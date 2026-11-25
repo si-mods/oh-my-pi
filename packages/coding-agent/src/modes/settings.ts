@@ -391,6 +391,33 @@ export const cfgTuiResizeScrollback = register({
 	},
 });
 
+export const cfgTuiTranscriptMode = register({
+	id: "tui.transcriptMode",
+	type: "enum",
+	values: ["inline", "fullscreen"] as const,
+	default: "inline",
+	ui: {
+		tab: "appearance",
+		group: "Display",
+		label: "Transcript Mode",
+		description:
+			"Inline keeps the transcript in the terminal's scrollback; fullscreen draws it on the alternate screen with the composer pinned and in-app scrolling (terminal only, next launch)",
+		options: [
+			{
+				value: "inline",
+				label: "Inline",
+				description: "Settled rows flow into the terminal's native scrollback (default)",
+			},
+			{
+				value: "fullscreen",
+				label: "Fullscreen",
+				description:
+					"Alternate screen; the composer stays pinned, PageUp/PageDown/Ctrl+Home/Ctrl+End scroll the transcript, and the whole transcript goes back to scrollback on exit",
+			},
+		],
+	},
+});
+
 export const cfgTerminalShowProgress = register({
 	id: "terminal.showProgress",
 	type: "boolean",

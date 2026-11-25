@@ -390,3 +390,25 @@ image environment settings.
 7. A failed write stops the writer; a graceful stop flushes the transcript.
 8. Width handling uses the shared ANSI-aware helpers and clamps rather than
    throwing in the render hot path. The renderer never probes scroll position.
+
+## 8. Fullscreen transcript mode
+
+`tui.transcriptMode: fullscreen` (terminal renderer only) keeps the transcript
+app-owned instead of writing it to native scrollback: the backend paints
+`main` and `dock` into `FramePlan.fullscreen`, the writer draws them on the
+alternate screen, and the app scrolls a window over the rows
+(`TermBackend.scrollTranscript`, exposed as `Host.scrollTranscript`).
+
+- Rows of the settled prefix are cached at the width they were painted at;
+  live blocks repaint every frame. A width change drops the cache and rebuilds
+  it from the block nodes, so nothing depends on the terminal's reflow.
+- The window is bottom-anchored while following. Scrolling up pins the top
+  row, so new rows do not move it, and one indicator row (`↓ N more lines`)
+  draws above the dock; `Ctrl+End` follows again.
+- While the mode is on, history batches are not built: the append-only
+  bookkeeping stays frozen rather than discarded. Switching the mode off marks
+  a replay, which clears the normal screen and writes the transcript there
+  again; the shutdown flush always writes it inline, so quitting leaves the
+  conversation in the terminal's scrollback.
+- Overlays composite over the window exactly as over an inline viewport, with
+  their hits shifted by the dock's top row.
