@@ -72,6 +72,8 @@ export interface ShellStartOptions {
 	readonly textSizing?: Accessor<boolean>;
 	/** The terminal clock painters read (scripted replays); default the wall clock. */
 	readonly clock?: Accessor<number>;
+	/** Run the terminal renderer's fullscreen transcript mode (`tui.transcriptMode`); may change at runtime. */
+	readonly transcriptFullscreen?: Accessor<boolean>;
 }
 
 /**
@@ -162,6 +164,7 @@ export class Shell {
 			...(options.hyperlinks ? { hyperlinks: options.hyperlinks } : {}),
 			...(options.textSizing ? { textSizing: options.textSizing } : {}),
 			...(options.clock ? { clock: options.clock } : {}),
+			...(options.transcriptFullscreen ? { transcriptFullscreen: options.transcriptFullscreen } : {}),
 			beforeTerminalRenderer: ensureTerminalStylesLoaded,
 		});
 		this.#host = host;

@@ -113,6 +113,8 @@ export class AppFrame {
 	readonly hyperlinks: Signal<boolean | undefined> = signal(undefined);
 	/** `tui.textSizing`: sized headings where the terminal supports them. */
 	readonly textSizing: Signal<boolean> = signal(false);
+	/** `tui.transcriptMode`: the transcript paints on the alternate screen, scrolled by the app. */
+	readonly transcriptFullscreen: Signal<boolean> = signal(false);
 	readonly #shape: Signal<string>;
 	readonly #quiet: Signal<boolean>;
 	/** Tip rolls, latched when the frame is built so the tip stays put for the session. */
@@ -183,6 +185,7 @@ export class AppFrame {
 			frameInterval: this.frameInterval,
 			hyperlinks: this.hyperlinks,
 			textSizing: this.textSizing,
+			transcriptFullscreen: this.transcriptFullscreen,
 			...(this.#terminal?.clock ? { clock: this.#terminal.clock } : {}),
 		});
 		if (options.clearHistory) this.shell.host?.replayHistory();

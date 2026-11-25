@@ -76,6 +76,12 @@ export interface HostOptions {
 	 * terminal-only painters lazily so native Tern sessions never load them.
 	 */
 	readonly beforeTerminalRenderer?: () => void;
+	/**
+	 * Run the terminal renderer's fullscreen transcript mode: the transcript and
+	 * the dock paint on the alternate screen, scrolled by the app. Never applies
+	 * to a native (Tern) surface, which draws the surface itself.
+	 */
+	readonly transcriptFullscreen?: Accessor<boolean>;
 }
 
 /** A running surface. */
@@ -123,6 +129,15 @@ export interface Host {
 	redescribe(node: UiNode): void;
 	/** Route `event` to the focused node as if the terminal sent it (a paste the app recovered itself). */
 	dispatch(event: InputEvent): void;
+	/**
+	 * Scroll the fullscreen transcript (rows, or to its start/end). False when the renderer is not in
+	 * that mode: natively, or with the inline transcript.
+	 */
+	scrollTranscript(by: number | "top" | "bottom"): boolean;
+	/** The fullscreen transcript window's position, or undefined when the mode is off. */
+	transcriptScroll():
+		| { readonly top: number; readonly maxTop: number; readonly bodyHeight: number; readonly following: boolean }
+		| undefined;
 	/** Whether the terminal advertises TSP feature `name` (reactive; always false in the terminal renderer). */
 	feature(name: string): boolean;
 	/**
@@ -223,6 +238,8 @@ type Renderer = Pick<
 	| "checkoutShown"
 	| "setMouse"
 	| "suspend"
+	| "scrollTranscript"
+	| "transcriptScroll"
 > & {
 	/** Stop rendering and release the renderer (not the driver). */
 	stop(): void;
@@ -351,6 +368,8 @@ export async function startHost(options: HostOptions): Promise<Host> {
 			replayHistory: () => {},
 			redescribe: node => backend.redescribe(node),
 			dispatch: event => backend.dispatch(event),
+			scrollTranscript: () => false,
+			transcriptScroll: () => undefined,
 			feature: name => connection.hasFeature(name),
 			checkoutShown: () => connection.checkout(),
 			setMouse: tracking => driver.setMouse(tracking),
@@ -387,6 +406,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
 			...(options.clock ? { clock: options.clock } : {}),
 			...(options.onKey ? { onKey: options.onKey } : {}),
 			...(options.intercept ? { intercept: options.intercept } : {}),
+			...(options.transcriptFullscreen ? { transcriptFullscreen: options.transcriptFullscreen } : {}),
 		});
 		debug?.start({
 			surface: options.surface,
@@ -408,6 +428,8 @@ export async function startHost(options: HostOptions): Promise<Host> {
 			replayHistory: () => driver.resetDisplay(),
 			redescribe: () => {},
 			dispatch: event => backend.dispatch(event),
+			scrollTranscript: by => backend.scrollTranscript(by),
+			transcriptScroll: () => backend.transcriptScroll(),
 			feature: () => false,
 			checkoutShown: () => false,
 			setMouse(tracking) {
@@ -452,6 +474,8 @@ export async function startHost(options: HostOptions): Promise<Host> {
 		replayHistory: () => renderer.replayHistory(),
 		redescribe: node => renderer.redescribe(node),
 		dispatch: event => renderer.dispatch(event),
+		scrollTranscript: by => renderer.scrollTranscript(by),
+		transcriptScroll: () => renderer.transcriptScroll(),
 		feature: name => renderer.feature(name),
 		checkoutShown: () => renderer.checkoutShown(),
 		suspend: run => renderer.suspend(run),

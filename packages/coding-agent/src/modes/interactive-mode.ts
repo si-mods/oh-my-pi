@@ -9,6 +9,7 @@ import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
 import { routedModelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { execReplace } from "@oh-my-pi/pi-natives";
+import type { InputEvent } from "@oh-my-pi/pi-tui/driver/index";
 import type { AutocompleteProvider, SlashCommand } from "../autocomplete/autocomplete";
 import type { KeyId } from "../config/keybindings/key-id";
 
@@ -335,6 +336,7 @@ import {
 	cfgTuiRenderEmbeds,
 	cfgTuiRenderSvg,
 	cfgTuiResizeScrollback,
+	cfgTuiTranscriptMode,
 	cfgTuiTextSizing,
 	cfgTuiTight,
 	cfgTuiTitleSpinner,
@@ -1364,6 +1366,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	#eventBus?: EventBus;
 	#subagentEventBus?: EventBus;
 	#eventBusUnsubscribers: Array<() => void> = [];
+	/** Removes the fullscreen transcript's scroll interceptor (registered once, by #startShell). */
+	#transcriptKeys: (() => void) | undefined;
 	/** Mirror of `tui.mouse`: the terminal reports clicks (node hits, extension links). */
 	#mouseCapture = false;
 	/** The fullscreen extension link browser while it is shown. */
@@ -1744,6 +1748,32 @@ export class InteractiveMode implements InteractiveModeContext {
 		});
 	}
 
+	/** PageUp/PageDown (half a screen), Ctrl+Home/Ctrl+End, the wheel: the fullscreen transcript's scrolling. */
+	#scrollFullscreenTranscript(event: InputEvent): boolean {
+		if (this.shell.overlays.open()) return false;
+		const host = this.shell.host;
+		const view = host?.transcriptScroll();
+		if (!host || !view) return false;
+		if (event.type === "mouse") {
+			const lines = event.mouse.button === "wheel-up" ? -3 : event.mouse.button === "wheel-down" ? 3 : 0;
+			return lines !== 0 && host.scrollTranscript(lines);
+		}
+		if (event.type !== "key" || event.key.kind !== "press") return false;
+		const page = Math.max(1, Math.floor(view.bodyHeight / 2));
+		switch (event.key.id) {
+			case "pageUp":
+				return host.scrollTranscript(-page);
+			case "pageDown":
+				return host.scrollTranscript(page);
+			case "ctrl+home":
+				return host.scrollTranscript("top");
+			case "ctrl+end":
+				return host.scrollTranscript("bottom");
+			default:
+				return false;
+		}
+	}
+
 	/** The terminal renderer's presented frames, for `/record` and the live stream (none natively). */
 	#frameSource(): StreamFrameSource {
 		return {
@@ -1759,11 +1789,31 @@ export class InteractiveMode implements InteractiveModeContext {
 		const hyperlinks = cfgTuiHyperlinks.get(this.settings);
 		this.#frame.hyperlinks.set(hyperlinks === "off" ? false : hyperlinks === "always" ? true : undefined);
 		this.#frame.textSizing.set(cfgTuiTextSizing.get(this.settings));
+		this.#frame.transcriptFullscreen.set(cfgTuiTranscriptMode.get(this.settings) === "fullscreen");
+		this.#syncInlineMouse();
+	}
+
+	/**
+	 * Mouse reporting for the inline view: all of it under `tui.mouse`; the fullscreen transcript asks
+	 * for clicks only, so the wheel scrolls it while dragging still falls through to the terminal.
+	 */
+	#syncInlineMouse(): void {
+		const fullscreen = cfgTuiTranscriptMode.get(this.settings) === "fullscreen";
+		this.shell.setInlineMouse(this.#mouseCapture ? "any" : fullscreen ? "click" : "off");
 	}
 
 	/** Follow the started host: terminal appearance, mouse, link routing, the tray, frame settings. */
 	#bindShellHost(): void {
+		// The prepaint path starts the shell before this, so the live settings apply here too.
+		this.#syncFrameSettings();
+		// The fullscreen transcript scrolls in-app: these keys never reach the composer, and nothing
+		// under an overlay (a picker pages its own list) is intercepted. The host reports false when
+		// the mode is off, so the keys pass through.
+		if (!this.#transcriptKeys) {
+			this.#transcriptKeys = this.interceptInput(event => this.#scrollFullscreenTranscript(event));
+		}
 		this.#eventBusUnsubscribers.push(cfgTuiMaxFps.listen(this.settings, () => this.#syncFrameSettings()));
+		this.#eventBusUnsubscribers.push(cfgTuiTranscriptMode.listen(this.settings, () => this.#syncFrameSettings()));
 		this.shell.transcript.onSelect = href => this.#onTranscriptSelect(href);
 		// A live task card's agent row (terminal): view that agent.
 		this.shell.transcript.onAction = act => {
@@ -1797,7 +1847,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#appearanceRefreshDeadline = 0;
 			untrack(() => this.shell.host?.replayHistory());
 		});
-		this.shell.setInlineMouse(this.#mouseCapture ? "any" : "off");
+		this.#syncInlineMouse();
 		// Tern routes link clicks and draws the tray itself: follow it as it comes and goes.
 		this.#effect(() => {
 			this.shell.native();

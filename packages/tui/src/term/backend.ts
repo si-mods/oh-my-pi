@@ -87,6 +87,15 @@ export interface TermBackendOptions {
 	 * the budget through `driver.images`.
 	 */
 	readonly images?: PaintImages;
+	/**
+	 * Render the transcript on the alternate screen in an app-scrolled window
+	 * instead of inline history (the append-only model is bypassed while it is
+	 * on): the dock stays pinned and {@link TermBackend.scrollTranscript}
+	 * moves the window. May change at runtime; switching back replays the whole
+	 * transcript inline. The shutdown flush always writes it inline, so exiting
+	 * leaves it in the terminal's scrollback.
+	 */
+	readonly transcriptFullscreen?: Accessor<boolean>;
 }
 
 /** A history batch offered to the driver until it acknowledges the id. */
@@ -339,6 +348,26 @@ export class TermBackend {
 	/** Disposes the watcher of the last frame's reactive reads. */
 	#disposeWatch: (() => void) | undefined;
 	#running = false;
+
+	// Fullscreen transcript (TermBackendOptions.transcriptFullscreen): the window is app-owned, so the
+	// inline history bookkeeping above is bypassed while it is on. Rows of the settled prefix are cached
+	// at the width they were painted at; live blocks are painted every frame.
+	/** Rows of the settled `main` prefix at {@link #fsWidth}. */
+	#fsRows: string[] = [];
+	/** The last settled block with rows in {@link #fsRows} (separator queries). */
+	#fsLast: UiNode | undefined;
+	/** How many `main` nodes the settled prefix covers. */
+	#fsSettled = 0;
+	#fsWidth = 0;
+	/** Absolute row the window starts at, from the first transcript row. */
+	#fsTop = 0;
+	/** Keep the window on the newest rows as content arrives. */
+	#fsFollow = true;
+	/** Last composed geometry, for clamping a scroll before the next frame. */
+	#fsMaxTop = 0;
+	#fsBodyHeight = 1;
+	/** Whether the last composed frame was a fullscreen transcript frame (the mode may change at runtime). */
+	#fsActive = false;
 
 	constructor(options: TermBackendOptions) {
 		this.#surface = options.surface;
@@ -694,7 +723,19 @@ export class TermBackend {
 			if (block.cursor) cursor = { row: top + block.cursor.row, col: left + block.cursor.col };
 			for (const hit of block.hits ?? []) hits.push({ hit, top, left });
 		};
+		const transcriptOn = this.#options.transcriptFullscreen?.() ?? false;
+		if (transcriptOn !== this.#fsActive) this.#switchTranscriptMode(transcriptOn);
 		const fullscreenAt = layer.findLastIndex(isFullscreen);
+		if (transcriptOn && !flush) {
+			const composed = this.#composeTranscript(width, height);
+			cursor = composed.cursor;
+			hits.push(...composed.hits);
+			for (const node of layer) place(composed.rows, node);
+			this.#hits = hits;
+			// The normal screen stays as it was under the alternate one.
+			this.#nextPin = this.#pin;
+			return { viewport: [], cursor, fullscreen: composed.rows };
+		}
 		if (fullscreenAt !== -1) {
 			const block = this.#paint(layer[fullscreenAt]!, width, height);
 			const rows = block.rows.slice(0, height);
@@ -994,6 +1035,133 @@ export class TermBackend {
 
 	#regions(): UiNode[] {
 		return [...this.#surface.layer(), ...this.#surface.dock(), ...this.#surface.main()];
+	}
+
+	/**
+	 * The fullscreen transcript: settled rows (cached at this width) followed by the live tail, cut to
+	 * the window {@link #fsTop} names, with the dock pinned beneath. A window above the tail carries a
+	 * one-row indicator of the rows below it.
+	 */
+	#composeTranscript(
+		width: number,
+		height: number,
+	): { rows: string[]; cursor: Cell | null; hits: { hit: Hit; top: number; left: number }[] } {
+		const main = this.#surface.main();
+		const separator = this.#options.separator ?? (() => 1);
+		if (this.#fsWidth !== width) {
+			this.#fsRows = [];
+			this.#fsLast = undefined;
+			this.#fsSettled = 0;
+			this.#fsWidth = width;
+		}
+		// Settle blocks into the cache once: a settled node's rows never change, and the frontier
+		// only moves forward, so the cache is append-only until the width changes.
+		while (this.#fsSettled < main.length && isSettled(main[this.#fsSettled]!)) {
+			const node = main[this.#fsSettled++]!;
+			const block = this.#paint(node, width);
+			if (block.rows.length === 0) continue;
+			if (this.#fsLast) for (let n = separator(this.#fsLast, node); n > 0; n--) this.#fsRows.push("");
+			this.#fsRows.push(...block.rows);
+			this.#fsLast = node;
+		}
+		const live: string[] = [];
+		let last = this.#fsLast;
+		for (let i = this.#fsSettled; i < main.length; i++) {
+			const node = main[i]!;
+			const block = this.#paint(node, width);
+			if (block.rows.length === 0) continue;
+			if (last) for (let n = separator(last, node); n > 0; n--) live.push("");
+			live.push(...block.rows);
+			last = node;
+		}
+
+		const dock: Placed[] = [];
+		let dockRows = 0;
+		for (const node of this.#surface.dock()) {
+			const block = this.#paint(node, width);
+			dock.push({ block, top: dockRows, left: 0 });
+			dockRows += block.rows.length;
+		}
+		const bodyHeight = Math.max(0, height - dockRows);
+		const settled = this.#fsRows;
+		const total = settled.length + live.length;
+		const maxTop = Math.max(0, total - bodyHeight);
+		const top = this.#fsFollow ? maxTop : Math.min(Math.max(0, this.#fsTop), maxTop);
+		const scrolled = total > top + bodyHeight;
+		const indicatorRows = scrolled && bodyHeight > 1 ? 1 : 0;
+		const contentHeight = bodyHeight - indicatorRows;
+		const below = Math.max(0, total - (top + contentHeight));
+		const body: string[] = [];
+		for (let i = top; i < Math.min(total, top + contentHeight); i++) {
+			body.push(i < settled.length ? settled[i]! : live[i - settled.length]!);
+		}
+		// A short transcript hugs the dock, like a shell prompt at the bottom of the screen.
+		while (body.length < contentHeight) body.unshift("");
+		const rows = [...body];
+		if (indicatorRows > 0) {
+			const count = `↓ ${below} more line${below === 1 ? "" : "s"}`;
+			const hint = " · Ctrl+End";
+			const text = visibleWidth(count + hint) <= width ? count + hint : count;
+			const pad = Math.max(0, width - visibleWidth(text) - 1);
+			rows.push(truncate(`${" ".repeat(pad)}${text}`, width, ""));
+		}
+		const hits: { hit: Hit; top: number; left: number }[] = [];
+		let cursor: Cell | null = null;
+		for (const placed of dock) {
+			rows.push(...placed.block.rows);
+			if (placed.block.cursor) {
+				cursor = { row: bodyHeight + placed.top + placed.block.cursor.row, col: placed.block.cursor.col };
+			}
+			for (const hit of placed.block.hits ?? []) hits.push({ hit, top: bodyHeight + placed.top, left: 0 });
+		}
+		this.#fsTop = top;
+		this.#fsMaxTop = maxTop;
+		this.#fsBodyHeight = contentHeight;
+		return { rows, cursor, hits };
+	}
+
+	/**
+	 * Turn the fullscreen transcript on or off between frames. Turning it off marks the display for a
+	 * replay: the alternate screen's rows were never written, so the normal screen gets the transcript
+	 * again, whole.
+	 */
+	#switchTranscriptMode(on: boolean): void {
+		this.#fsActive = on;
+		this.#fsRows = [];
+		this.#fsLast = undefined;
+		this.#fsSettled = 0;
+		this.#fsWidth = 0;
+		this.#fsTop = 0;
+		this.#fsMaxTop = 0;
+		this.#fsFollow = true;
+		if (on) return;
+		this.#replay = true;
+		this.#emitted.clear();
+		this.#pending = undefined;
+		this.#pin = undefined;
+	}
+
+	/** Scroll the fullscreen transcript: rows (`+` down), or to its start/end. False when the mode is off. */
+	scrollTranscript(by: number | "top" | "bottom"): boolean {
+		if (!this.#fsActive) return false;
+		if (by === "top") {
+			this.#fsTop = 0;
+			this.#fsFollow = false;
+		} else if (by === "bottom") {
+			this.#fsTop = this.#fsMaxTop;
+			this.#fsFollow = true;
+		} else {
+			this.#fsTop = Math.max(0, Math.min(this.#fsMaxTop, this.#fsTop + by));
+			this.#fsFollow = this.#fsTop >= this.#fsMaxTop;
+		}
+		this.requestRender();
+		return true;
+	}
+
+	/** Where the fullscreen transcript window stands: its top row, the last one, and whether it follows new rows. */
+	transcriptScroll(): { top: number; maxTop: number; bodyHeight: number; following: boolean } | undefined {
+		if (!this.#fsActive) return undefined;
+		return { top: this.#fsTop, maxTop: this.#fsMaxTop, bodyHeight: this.#fsBodyHeight, following: this.#fsFollow };
 	}
 
 	#widgetContext(path: readonly UiNode[]): WidgetContext {

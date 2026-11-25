@@ -14,6 +14,7 @@
 
 ### Added
 
+- `tui.transcriptMode: fullscreen` draws the transcript on the terminal's alternate screen with the composer pinned, scrolls it in-app (`PageUp`/`PageDown` by half a page, `Ctrl+Home`/`Ctrl+End` for the ends, a `↓ N more lines` row while scrolled up), keeps following the tail until you scroll away from it, and writes the whole transcript back into scrollback on exit. Applies live, without a restart; `inline` keeps the current behavior ([#1](https://github.com/si-mods/oh-my-pi/pull/1) by [@kyya](https://github.com/kyya)).
 - Processes a bash call leaves running (`cmd &`, `(cmd &)`, `nohup cmd &`) no longer leak: the agent is reminded of them when it stops so it can register them as services or kill them, and the `&` ones are killed when the session ends (`nohup` ones never are). Turn off with `bash.reapBackground`; RPC mode never reaps.
 - New `o2ctl services` command in the bash tool's shell: `o2ctl services add <name> <pid|%job>` keeps an already-running process as a named service without restarting it (listed, supervised and stopped like any other; when its stdout or stderr goes to a file such as `nohup.out`, that file is the service's output), `o2ctl services ls` lists services and `o2ctl services stop <name>` stops one.
 

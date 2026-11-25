@@ -16,7 +16,7 @@
 import type { FramePlan, InputEvent, MouseEvent, TerminalCapabilities, TerminalDriver } from "../driver/contract";
 import type { KeyEvent } from "../events";
 import type { UiNode } from "../node";
-import { batch, signal, type Signal } from "../reactive";
+import { type Accessor, batch, signal, type Signal } from "../reactive";
 import { createSurface, type Surface, type SurfaceTemplate } from "../surface";
 import { TermBackend, type TermBackendOptions } from "../term/backend";
 import { stripEscapes } from "../text/ansi";
@@ -37,6 +37,8 @@ export interface TestTerminalOptions {
 	readonly textSizing?: TermBackendOptions["textSizing"];
 	/** Drive this surface (an app shell's) instead of one built from the template. */
 	readonly surface?: Surface;
+	/** Run the backend's fullscreen transcript mode (alternate screen, app-scrolled window); a signal switches it live. */
+	readonly transcriptFullscreen?: boolean | Accessor<boolean>;
 }
 
 /** See the module docs. */
@@ -172,6 +174,14 @@ export function createTestTerminal(template: () => SurfaceTemplate, options: Tes
 		...(options.onKey ? { onKey: options.onKey } : {}),
 		...(options.intercept ? { intercept: options.intercept } : {}),
 		...(options.textSizing ? { textSizing: options.textSizing } : {}),
+		...(options.transcriptFullscreen
+			? {
+					transcriptFullscreen:
+						typeof options.transcriptFullscreen === "boolean"
+							? () => options.transcriptFullscreen === true
+							: options.transcriptFullscreen,
+				}
+			: {}),
 	});
 	backend.start();
 	const input = (event: InputEvent): void => {
