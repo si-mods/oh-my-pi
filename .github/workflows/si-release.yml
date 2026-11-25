@@ -1,0 +1,106 @@
+name: si-release
+
+# Build the standalone omp binaries for this fork and publish them as a GitHub
+# release, the channel `omp update` reads when the package's repository is not
+# the build service's (see docs/update-channel.md).
+on:
+   workflow_dispatch:
+      inputs:
+         version:
+            description: "Version without the leading v (default: packages/coding-agent/package.json)"
+            required: false
+   push:
+      tags:
+         - "v*"
+
+permissions:
+   contents: write
+
+concurrency:
+   group: si-release-${{ github.ref }}
+   cancel-in-progress: false
+
+jobs:
+   build:
+      runs-on: macos-14
+      strategy:
+         fail-fast: false
+         matrix:
+            target: [darwin-arm64, darwin-x64]
+      steps:
+         - uses: actions/checkout@v4
+
+         - uses: oven-sh/setup-bun@v2
+           with:
+              bun-version: "1.4.5"
+
+         - name: Install dependencies
+           run: bun install --frozen-lockfile --ignore-scripts
+
+         - name: Fetch the target's native addon
+           run: |
+              set -euo pipefail
+              version="$(jq -r .version packages/natives/package.json)"
+              case "${{ matrix.target }}" in
+                darwin-arm64) package="@oh-my-pi/pi-natives-darwin-arm64" ;;
+                darwin-x64) package="@oh-my-pi/pi-natives-darwin-x64" ;;
+                *) echo "No native addon package for ${{ matrix.target }}" >&2; exit 1 ;;
+              esac
+              work="$(mktemp -d)"
+              cd "$work"
+              npm pack "${package}@${version}" >/dev/null
+              tar xzf ./*.tgz
+              cp package/pi_natives.*.node "${GITHUB_WORKSPACE}/packages/natives/native/"
+
+         - name: Build
+           run: CROSS_TARGET="${{ matrix.target }}" bun --cwd=packages/coding-agent run build
+
+         - name: Checksum
+           run: |
+              set -euo pipefail
+              binary="packages/coding-agent/dist/omp-${{ matrix.target }}"
+              shasum -a 256 "$binary" | sed "s|.*/||" > "omp-${{ matrix.target }}.sha256"
+              "$binary" --version
+
+         - uses: actions/upload-artifact@v4
+           with:
+              name: omp-${{ matrix.target }}
+              path: |
+                 packages/coding-agent/dist/omp-${{ matrix.target }}
+                 omp-${{ matrix.target }}.sha256
+              if-no-files-found: error
+
+   publish:
+      needs: build
+      runs-on: ubuntu-latest
+      steps:
+         - uses: actions/checkout@v4
+
+         - uses: actions/download-artifact@v4
+           with:
+              path: dist
+              merge-multiple: true
+
+         - name: Publish the release
+           env:
+              GH_TOKEN: ${{ github.token }}
+           run: |
+              set -euo pipefail
+              version="${{ inputs.version }}"
+              if [ -z "$version" ]; then
+                case "$GITHUB_REF" in
+                  refs/tags/v*) version="${GITHUB_REF_NAME#v}" ;;
+                  *) version="$(jq -r .version packages/coding-agent/package.json)" ;;
+                esac
+              fi
+              tag="v${version}"
+              cat dist/*.sha256 > SHASUMS256.txt
+              cat SHASUMS256.txt
+              if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber \
+                  dist/omp-darwin-arm64 dist/omp-darwin-x64 SHASUMS256.txt
+              else
+                gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "omp ${version}" \
+                  --notes "si-mods build of omp ${version}. Install: curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/scripts/install.sh | sh" \
+                  dist/omp-darwin-arm64 dist/omp-darwin-x64 SHASUMS256.txt
+              fi

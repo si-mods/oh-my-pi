@@ -12,7 +12,7 @@
 # patches; -Source installs the package via bun and is implied by a bare -Ref.
 # -Ref takes any tag/commit/branch with -Source; binary installs take a release
 # tag (v<version>). Prebuilt binaries come from the build service
-# ($env:PI_BUILD_URL, default https://build.stencil.so) and are checked against
+# ($env:PI_BUILD_URL) and are checked against
 # its sha256 before install.
 
 param(
@@ -31,10 +31,10 @@ if ($PSVersionTable.PSVersion -lt [version]"5.1") {
     throw "Windows PowerShell 5.1 or newer is required (found $($PSVersionTable.PSVersion)). Install PowerShell 7 from https://aka.ms/powershell and re-run the installer."
 }
 
-$Repo = "can1357/oh-my-pi"
+$Repo = if ($env:PI_RELEASE_REPO) { $env:PI_RELEASE_REPO } else { "si-mods/oh-my-pi" }
 $Package = "@oh-my-pi/pi-coding-agent"
 $InstallDir = if ($env:PI_INSTALL_DIR) { $env:PI_INSTALL_DIR } else { "$env:LOCALAPPDATA\omp" }
-$BuildUrl = if ($env:PI_BUILD_URL) { $env:PI_BUILD_URL.TrimEnd("/") } else { "https://build.stencil.so" }
+$BuildUrl = if ($env:PI_BUILD_URL) { $env:PI_BUILD_URL.TrimEnd("/") } else { $null }
 # Windows PowerShell 5.1 (.NET Framework) does not reliably resolve
 # [System.Runtime.InteropServices.RuntimeInformation] without an
 # assembly-qualified name, while PowerShell 7+ (Core) loads that type from a
@@ -289,6 +289,9 @@ function Install-ViaBun {
 }
 
 function Install-Binary {
+    if (-not $BuildUrl) {
+        throw "This fork publishes macOS binaries only. Install from source with -Source, or set PI_BUILD_URL to a build service that serves Windows builds."
+    }
     if ($Ref) {
         if ($Ref -notmatch '^v(\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$') {
             throw "Binary installs take a release tag (v<version>) for -Ref, got: $Ref`nFor branch/commit installs, use -Source with -Ref."

@@ -33,6 +33,7 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { $env, APP_NAME, isEnoent, isRecord, VERSION } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
+import packageJson from "../../package.json" with { type: "json" };
 import {
 	isTimeoutError,
 	isUnsupportedProxyError,
@@ -275,12 +276,181 @@ export interface FetchBuildOptions {
 	fetchImpl?: Fetch;
 	/** Defaults to {@link currentBuildHost}. */
 	host?: BuildHost;
+	/**
+	 * The repository whose GitHub Releases to read when no build service serves it; defaults to
+	 * {@link releaseRepo}. Set it to the build service's repository to force that path in tests.
+	 */
+	repo?: string;
+}
+
+/** The repository this build's releases are published in, from the package metadata. */
+function packageRepo(): string {
+	const repository = packageJson["repository"];
+	const url = isRecord(repository) && typeof repository["url"] === "string" ? repository["url"] : "";
+	const match = /github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/.exec(url);
+	return match ? `${match[1]}/${match[2]}` : "can1357/oh-my-pi";
+}
+
+/** `owner/repo` whose GitHub Releases carry this build: `PI_RELEASE_REPO`, else the package's repository. */
+export function releaseRepo(): string {
+	const configured = ($env.PI_RELEASE_REPO ?? "")
+		.trim()
+		.replace(/^https?:\/\/github\.com\//i, "")
+		.replace(/\.git$/, "")
+		.replace(/^\/+|\/+$/g, "");
+	return configured || packageRepo();
+}
+
+/** GitHub API origin: `PI_GITHUB_API` for a mirror or a private forge; `https://api.github.com` otherwise. */
+export function githubApiUrl(): string {
+	return (($env.PI_GITHUB_API ?? "").trim() || "https://api.github.com").replace(/\/+$/, "");
+}
+
+/** The repository the build service publishes builds of. */
+const BUILD_SERVICE_REPO = "can1357/oh-my-pi";
+
+/**
+ * Whether this build comes from the build service: `PI_BUILD_URL` names one
+ * explicitly, and the upstream repository is the service's product. A fork
+ * publishes plain GitHub releases instead ({@link fetchReleaseBuild}).
+ */
+export function usesBuildService(repo: string = releaseRepo()): boolean {
+	return ($env.PI_BUILD_URL ?? "").trim() !== "" || repo.toLowerCase() === BUILD_SERVICE_REPO;
+}
+
+/** GitHub Releases URL of `fileName` at `version`, the tag being `v<version>`. */
+export function releaseAssetUrl(version: string, fileName: string): string {
+	return `https://github.com/${releaseRepo()}/releases/download/v${version}/${fileName}`;
+}
+
+/** Options for {@link fetchReleaseBuild}: the GitHub repository and API it reads. */
+export interface ReleaseBuildOptions extends FetchBuildOptions {
+	/** Defaults to {@link githubApiUrl}. */
+	apiBase?: string;
+	/** Defaults to `GH_TOKEN`/`GITHUB_TOKEN` (rate limits, private repositories). */
+	token?: string;
+}
+
+/** The sha256 `sha256sum`-format listing gives `fileName`, if any. */
+function checksumFor(listing: string, fileName: string): string | undefined {
+	for (const line of listing.split("\n")) {
+		const match = /^([0-9a-f]{64})\s+\*?(.+?)\s*$/.exec(line);
+		if (match?.[2] === fileName) return match[1];
+	}
+	return undefined;
+}
+
+/**
+ * Ask `repo`'s GitHub Releases for a build: the newest release on the channel
+ * (GitHub's `latest`, which skips drafts and pre-releases) or the release
+ * tagged `v<version>`, its asset for this host, and the `SHASUMS256.txt`
+ * asset beside it for the size and digest the download is verified against.
+ * A release without that listing is refused rather than installed unverified.
+ */
+export async function fetchReleaseBuild(
+	selector: BuildSelector,
+	options: ReleaseBuildOptions = {},
+): Promise<BuildAnswer> {
+	const product = options.product ?? OMP_BUILD;
+	const host = options.host ?? (await currentBuildHost());
+	const repo = options.repo ?? releaseRepo();
+	const api = (options.apiBase ?? githubApiUrl()).replace(/\/+$/, "");
+	const token = options.token ?? ($env.GH_TOKEN ?? $env.GITHUB_TOKEN ?? "").trim();
+	const timeoutMs = options.timeoutMs ?? BUILD_CHECK_TIMEOUT_MS;
+	const fetchImpl = options.fetchImpl ?? fetch;
+	const what = `${product.id} ${
+		"channel" in selector ? `${selector.channel} release` : `release ${selector.version}`
+	} for ${host.target}`;
+	const headers: Record<string, string> = {
+		Accept: "application/vnd.github+json",
+		"User-Agent": `${APP_NAME}/${VERSION}`,
+		...(token ? { Authorization: `Bearer ${token}` } : {}),
+	};
+	const get = async (url: string): Promise<Response> => {
+		try {
+			return await fetchImpl(url, { headers, signal: withTimeoutSignal(timeoutMs) });
+		} catch (err) {
+			if (isTimeoutError(err)) {
+				return Promise.reject(
+					new Error(`Timed out asking ${url} for the ${what} after ${Math.round(timeoutMs / 1000)}s`, {
+						cause: err,
+					}),
+				);
+			}
+			if (isUnsupportedProxyError(err)) throw new Error(unsupportedProxyMessage(), { cause: err });
+			throw err;
+		}
+	};
+
+	const route = "channel" in selector ? "latest" : `tags/v${encodeURIComponent(selector.version)}`;
+	const releaseUrl = `${api}/repos/${repo}/releases/${route}`;
+	const response = await get(releaseUrl);
+	if (response.status === 404) {
+		const hint =
+			"channel" in selector && selector.channel === "canary"
+				? ` Try \`${APP_NAME} update --stable\`.`
+				: ` Publish a release with ${product.fileName(host, "x.y.z")} and SHASUMS256.txt, or point PI_RELEASE_REPO at the repository that has one.`;
+		throw new Error(`No ${what} is published on ${repo} yet.${hint}`);
+	}
+	if (!response.ok) throw new Error(`${repo} answered ${response.status} ${response.statusText} for the ${what}`);
+	let body: unknown;
+	try {
+		body = await response.json();
+	} catch (err) {
+		throw new Error(
+			`Invalid release answer from ${repo} for the ${what}: ${err instanceof Error ? err.message : err}`,
+		);
+	}
+	if (!isRecord(body)) throw new Error(`Invalid release answer from ${repo} for the ${what}: not an object`);
+	const tag = body["tag_name"];
+	if (typeof tag !== "string" || !tag.startsWith("v")) {
+		throw new Error(`Invalid release answer from ${repo} for the ${what}: no v<version> tag_name`);
+	}
+	const version = tag.slice(1);
+	if (!isBuildVersion(version)) throw new Error(`Release ${tag} on ${repo} is not a version this updater installs`);
+	const fileName = product.fileName(host, version);
+	const assets = Array.isArray(body["assets"]) ? body["assets"].filter(isRecord) : [];
+	const asset = assets.find(candidate => candidate["name"] === fileName);
+	if (
+		!asset ||
+		!isSize(asset["size"]) ||
+		typeof asset["browser_download_url"] !== "string" ||
+		!isHttpsUrl(asset["browser_download_url"])
+	) {
+		throw new Error(`Release ${tag} on ${repo} has no ${fileName} asset`);
+	}
+	const listingAsset = assets.find(
+		candidate => candidate["name"] === "SHASUMS256.txt" && isHttpsUrl(candidate["browser_download_url"]),
+	);
+	if (!listingAsset) {
+		throw new Error(
+			`Release ${tag} on ${repo} has no SHASUMS256.txt beside ${fileName}; refusing an unverified download`,
+		);
+	}
+	const listing = await get(listingAsset["browser_download_url"] as string);
+	if (!listing.ok) {
+		throw new Error(`${repo} answered ${listing.status} ${listing.statusText} for SHASUMS256.txt of ${tag}`);
+	}
+	const sha256 = checksumFor(await listing.text(), fileName);
+	if (!sha256) {
+		throw new Error(`SHASUMS256.txt of ${tag} on ${repo} names no sha256 for ${fileName}`);
+	}
+	return {
+		version,
+		file: { name: fileName, size: asset["size"] as number, sha256 },
+		download: asset["browser_download_url"] as string,
+	};
 }
 
 /** Ask the build service for a build of this host's target ({@link BuildSelector}). */
 export async function fetchBuild(selector: BuildSelector, options: FetchBuildOptions = {}): Promise<BuildAnswer> {
 	const product = options.product ?? OMP_BUILD;
 	const host = options.host ?? (await currentBuildHost());
+	// A fork publishes plain GitHub releases; only the build service's own repository has builds there.
+	const repo = options.repo ?? releaseRepo();
+	if (product === OMP_BUILD && !usesBuildService(repo)) {
+		return fetchReleaseBuild(selector, { ...options, product, host, repo });
+	}
 	const origin = buildServiceUrl();
 	const timeoutMs = options.timeoutMs ?? BUILD_CHECK_TIMEOUT_MS;
 	const route =
