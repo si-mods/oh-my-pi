@@ -74,6 +74,8 @@ export interface ShellStartOptions {
 	readonly clock?: Accessor<number>;
 	/** Run the terminal renderer's fullscreen transcript mode (`tui.transcriptMode`); may change at runtime. */
 	readonly transcriptFullscreen?: Accessor<boolean>;
+	/** Receives a selection made over the fullscreen transcript when the button is released. */
+	readonly onTranscriptCopy?: (text: string) => void;
 }
 
 /**
@@ -165,6 +167,7 @@ export class Shell {
 			...(options.textSizing ? { textSizing: options.textSizing } : {}),
 			...(options.clock ? { clock: options.clock } : {}),
 			...(options.transcriptFullscreen ? { transcriptFullscreen: options.transcriptFullscreen } : {}),
+			...(options.onTranscriptCopy ? { onTranscriptCopy: options.onTranscriptCopy } : {}),
 			beforeTerminalRenderer: ensureTerminalStylesLoaded,
 		});
 		this.#host = host;

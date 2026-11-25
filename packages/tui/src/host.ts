@@ -82,6 +82,8 @@ export interface HostOptions {
 	 * to a native (Tern) surface, which draws the surface itself.
 	 */
 	readonly transcriptFullscreen?: Accessor<boolean>;
+	/** Receives the text of a mouse selection over the fullscreen transcript on release (the app owns the clipboard). */
+	readonly onTranscriptCopy?: (text: string) => void;
 }
 
 /** A running surface. */
@@ -407,6 +409,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
 			...(options.onKey ? { onKey: options.onKey } : {}),
 			...(options.intercept ? { intercept: options.intercept } : {}),
 			...(options.transcriptFullscreen ? { transcriptFullscreen: options.transcriptFullscreen } : {}),
+			...(options.onTranscriptCopy ? { onTranscriptCopy: options.onTranscriptCopy } : {}),
 		});
 		debug?.start({
 			surface: options.surface,

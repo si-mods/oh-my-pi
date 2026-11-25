@@ -1799,7 +1799,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	 */
 	#syncInlineMouse(): void {
 		const fullscreen = cfgTuiTranscriptMode.get(this.settings) === "fullscreen";
-		this.shell.setInlineMouse(this.#mouseCapture ? "any" : fullscreen ? "click" : "off");
+		// Dragging over the transcript selects and copies on release, so the fullscreen mode reports drags.
+		this.shell.setInlineMouse(this.#mouseCapture ? "any" : fullscreen ? "drag" : "off");
 	}
 
 	/** Follow the started host: terminal appearance, mouse, link routing, the tray, frame settings. */

@@ -39,6 +39,8 @@ export interface TestTerminalOptions {
 	readonly surface?: Surface;
 	/** Run the backend's fullscreen transcript mode (alternate screen, app-scrolled window); a signal switches it live. */
 	readonly transcriptFullscreen?: boolean | Accessor<boolean>;
+	/** Receives a selection made over the fullscreen transcript when the button is released. */
+	readonly onTranscriptCopy?: (text: string) => void;
 }
 
 /** See the module docs. */
@@ -182,6 +184,7 @@ export function createTestTerminal(template: () => SurfaceTemplate, options: Tes
 							: options.transcriptFullscreen,
 				}
 			: {}),
+		...(options.onTranscriptCopy ? { onTranscriptCopy: options.onTranscriptCopy } : {}),
 	});
 	backend.start();
 	const input = (event: InputEvent): void => {

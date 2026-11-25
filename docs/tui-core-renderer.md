@@ -410,5 +410,10 @@ alternate screen, and the app scrolls a window over the rows
   a replay, which clears the normal screen and writes the transcript there
   again; the shutdown flush always writes it inline, so quitting leaves the
   conversation in the terminal's scrollback.
+- A left-drag over the window selects cells: the frame inverts them, and the
+  release hands the text (`TermBackendOptions.onTranscriptCopy`, after
+  `stripEscapes` and trailing-blank trim) to the app for the clipboard. The
+  dock under the window keeps its own clicks, and scrolling drops the
+  selection.
 - Overlays composite over the window exactly as over an inline viewport, with
   their hits shifted by the dock's top row.
