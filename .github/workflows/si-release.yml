@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
    build:
-      runs-on: macos-14
+      runs-on: instabox-medium
       strategy:
          fail-fast: false
          matrix:
@@ -47,20 +47,24 @@ jobs:
                 *) echo "No native addon package for ${{ matrix.target }}" >&2; exit 1 ;;
               esac
               work="$(mktemp -d)"
-              cd "$work"
-              npm pack "${package}@${version}" >/dev/null
-              tar xzf ./*.tgz
-              cp package/pi_natives.*.node "${GITHUB_WORKSPACE}/packages/natives/native/"
+              tarball="$(curl -fsSL "https://registry.npmjs.org/${package//\//%2F}/${version}" | jq -r .dist.tarball)"
+              curl -fsSL "$tarball" | tar xz -C "$work" --strip-components=1
+              cp "$work"/pi_natives.*.node "${GITHUB_WORKSPACE}/packages/natives/native/"
 
          - name: Build
            run: CROSS_TARGET="${{ matrix.target }}" bun --cwd=packages/coding-agent run build
+
+         # Cross-compiled on Linux, where Bun's own Mach-O signature is unusable: replace it
+         # (a Developer ID when the APPLE_* secrets exist, ad hoc otherwise) so macOS runs it.
+         - name: Sign the macOS binary
+           run: bash scripts/ci-macos-sign.sh "packages/coding-agent/dist/omp-${{ matrix.target }}"
 
          - name: Checksum
            run: |
               set -euo pipefail
               binary="packages/coding-agent/dist/omp-${{ matrix.target }}"
-              shasum -a 256 "$binary" | sed "s|.*/||" > "omp-${{ matrix.target }}.sha256"
-              "$binary" --version
+              sha256sum "$binary" | sed "s|.*/||" > "omp-${{ matrix.target }}.sha256"
+              file "$binary"
 
          - uses: actions/upload-artifact@v4
            with:
@@ -72,7 +76,7 @@ jobs:
 
    publish:
       needs: build
-      runs-on: ubuntu-latest
+      runs-on: instabox-medium
       steps:
          - uses: actions/checkout@v4
 
