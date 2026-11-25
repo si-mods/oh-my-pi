@@ -16,7 +16,7 @@ interface Transcript {
 
 /** One settled one-row block per line, a one-row dock, on a 20x6 terminal by default. */
 function transcript(lines: string[], options: { columns?: number; rows?: number } = {}): Transcript {
-	const blocks = signal<UiNode[]>(lines.map(line => <text text={line} /> as UiNode));
+	const blocks = signal<UiNode[]>(lines.map(line => (<text text={line} />) as UiNode));
 	for (const node of blocks.peek()) settle(node);
 	const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
 		columns: options.columns ?? 20,
@@ -115,7 +115,7 @@ describe("fullscreen transcript", () => {
 	it("switches modes between frames and replays the transcript inline", () => {
 		const fullscreen = signal(false);
 		const lines = ["a", "b", "c", "d", "e", "f", "g", "h"];
-		const blocks = signal<UiNode[]>(lines.map(line => <text text={line} /> as UiNode));
+		const blocks = signal<UiNode[]>(lines.map(line => (<text text={line} />) as UiNode));
 		for (const node of blocks.peek()) settle(node);
 		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
 			columns: 20,
@@ -135,6 +135,58 @@ describe("fullscreen transcript", () => {
 		term.render();
 		expect(term.fullscreen()).toBeUndefined();
 		expect(term.history()).toEqual(inline);
+		term.dispose();
+	});
+});
+
+describe("fullscreen transcript selection", () => {
+	/** The same transcript, with the copy callback captured. */
+	function selectable(lines: string[]) {
+		const blocks = signal<UiNode[]>(lines.map(line => (<text text={line} />) as UiNode));
+		for (const node of blocks.peek()) settle(node);
+		const copied: string[] = [];
+		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
+			columns: 20,
+			rows: 6,
+			transcriptFullscreen: true,
+			onTranscriptCopy: text => copied.push(text),
+		});
+		return { term, copied };
+	}
+
+	it("inverts the dragged cells and copies their text on release", () => {
+		const { term, copied } = selectable(["a", "b", "c", "d", "e", "f", "g", "h"]);
+
+		term.mouse({ row: 0, col: 0, button: "left", action: "press", mods: [] });
+		expect(term.rows().some(row => row.includes("\x1b[7m"))).toBe(true);
+		term.mouse({ row: 2, col: 0, button: "left", action: "drag", mods: [] });
+		term.mouse({ row: 2, col: 0, button: "left", action: "release", mods: [] });
+
+		expect(copied).toEqual(["f\n\ng"]);
+		expect(term.rows().some(row => row.includes("\x1b[7m"))).toBe(false);
+		term.dispose();
+	});
+
+	it("leaves clicks on the dock to the dock", () => {
+		const { term, copied } = selectable(["a", "b", "c"]);
+
+		term.mouse({ row: 5, col: 0, button: "left", action: "press", mods: [] });
+		term.mouse({ row: 5, col: 2, button: "left", action: "release", mods: [] });
+
+		expect(copied).toEqual([]);
+		term.dispose();
+	});
+
+	it("drops a selection when the transcript scrolls", () => {
+		const { term, copied } = selectable(["a", "b", "c", "d", "e", "f", "g", "h"]);
+
+		term.mouse({ row: 0, col: 0, button: "left", action: "press", mods: [] });
+		term.mouse({ row: 1, col: 0, button: "left", action: "drag", mods: [] });
+		term.backend.scrollTranscript(-2);
+		term.render();
+		term.mouse({ row: 1, col: 0, button: "left", action: "release", mods: [] });
+
+		expect(copied).toEqual([]);
 		term.dispose();
 	});
 });

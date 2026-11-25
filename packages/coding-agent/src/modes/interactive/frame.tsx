@@ -16,6 +16,7 @@ import { staticEnvironment } from "@oh-my-pi/pi-tui/term/paint";
 import { renderBlock } from "@oh-my-pi/pi-tui/term/render";
 import { currentTheme } from "@oh-my-pi/pi-tui/theme/runtime";
 import { setSymbolPreset } from "../../ui/theme/service";
+import { copyToClipboard } from "../../utils/clipboard";
 import type { Keybinding } from "../../config/keybindings/app-keybindings";
 import { getKeybindings } from "../../config/keybindings/keybindings";
 import { Composer, ComposerChips } from "../../ui/composer";
@@ -186,6 +187,9 @@ export class AppFrame {
 			hyperlinks: this.hyperlinks,
 			textSizing: this.textSizing,
 			transcriptFullscreen: this.transcriptFullscreen,
+			onTranscriptCopy: text => {
+				void copyToClipboard(text);
+			},
 			...(this.#terminal?.clock ? { clock: this.#terminal.clock } : {}),
 		});
 		if (options.clearHistory) this.shell.host?.replayHistory();

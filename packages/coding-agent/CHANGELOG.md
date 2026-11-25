@@ -14,6 +14,7 @@
 
 ### Added
 
+- Dragging over the fullscreen transcript selects it (the cells invert as the drag covers them) and copies the text on release, through the same clipboard path as the transcript's copy actions; the dock keeps its own clicks, and scrolling drops the selection.
 - Updates and installs from this fork come from its own GitHub Releases: `omp update` reads `v<version>` releases and verifies them against `SHASUMS256.txt`, and `.github/workflows/si-release.yml` builds and publishes the macOS binaries for a tag or on demand. `PI_RELEASE_REPO` and `PI_GITHUB_API` retarget the channel; see [Update channel](../../docs/update-channel.md).
 - `tui.transcriptMode: fullscreen` draws the transcript on the terminal's alternate screen with the composer pinned, scrolls it in-app (`PageUp`/`PageDown` by half a page, `Ctrl+Home`/`Ctrl+End` for the ends, a `↓ N more lines` row while scrolled up), keeps following the tail until you scroll away from it, and writes the whole transcript back into scrollback on exit. Applies live, without a restart; `inline` keeps the current behavior ([#1](https://github.com/si-mods/oh-my-pi/pull/1) by [@kyya](https://github.com/kyya)).
 - Processes a bash call leaves running (`cmd &`, `(cmd &)`, `nohup cmd &`) no longer leak: the agent is reminded of them when it stops so it can register them as services or kill them, and the `&` ones are killed when the session ends (`nohup` ones never are). Turn off with `bash.reapBackground`; RPC mode never reaps.

@@ -38,7 +38,8 @@ import {
 } from "../reactive";
 import { isSettled, type Surface } from "../surface";
 import type { Theme } from "../theme/contract";
-import { padTo, truncate, visibleWidth } from "../text/width";
+import { stripEscapes } from "../text/ansi";
+import { padTo, sliceColumns, truncate, visibleWidth } from "../text/width";
 import {
 	type Block,
 	type Cell,
@@ -96,6 +97,12 @@ export interface TermBackendOptions {
 	 * leaves it in the terminal's scrollback.
 	 */
 	readonly transcriptFullscreen?: Accessor<boolean>;
+	/**
+	 * Receives the text of a mouse selection over the fullscreen transcript when
+	 * the button is released (copy on select); the renderer owns the selection
+	 * and the text, the app owns the clipboard.
+	 */
+	readonly onTranscriptCopy?: (text: string) => void;
 }
 
 /** A history batch offered to the driver until it acknowledges the id. */
@@ -366,6 +373,12 @@ export class TermBackend {
 	/** Last composed geometry, for clamping a scroll before the next frame. */
 	#fsMaxTop = 0;
 	#fsBodyHeight = 1;
+	/** The left-drag selection over the transcript, in screen cells (anchor and current). */
+	#selection: { anchorRow: number; anchorCol: number; row: number; col: number } | undefined;
+	/** Screen row the transcript window ends at in the last fullscreen frame (the indicator/dock start there). */
+	#fsDockTop = 0;
+	/** The transcript rows the last fullscreen frame showed: what a selection copies from. */
+	#fsShown: string[] = [];
 	/** Whether the last composed frame was a fullscreen transcript frame (the mode may change at runtime). */
 	#fsActive = false;
 
@@ -1117,7 +1130,89 @@ export class TermBackend {
 		this.#fsTop = top;
 		this.#fsMaxTop = maxTop;
 		this.#fsBodyHeight = contentHeight;
+		this.#fsDockTop = contentHeight;
+		this.#fsShown = body;
+		this.#highlightSelection(rows);
 		return { rows, cursor, hits };
+	}
+
+	/** Invert the selected cells of the transcript window (rows are the frame's, content first). */
+	#highlightSelection(rows: string[]): void {
+		const selection = this.#selection;
+		if (!selection) return;
+		const [first, last] = this.#selectionRange(selection);
+		for (let row = first.row; row <= last.row && row < rows.length && row < this.#fsDockTop; row++) {
+			const from = row === first.row ? first.col : 0;
+			const to = row === last.row ? last.col + 1 : this.#fsWidth;
+			if (to <= from) continue;
+			const text = rows[row]!;
+			rows[row] =
+				`${sliceColumns(text, 0, from)}\x1b[7m${sliceColumns(text, from, to)}\x1b[27m${sliceColumns(text, to, this.#fsWidth)}`;
+		}
+	}
+
+	/** The selection in reading order: first row/column, then last row/column (both inclusive). */
+	#selectionRange(selection: {
+		anchorRow: number;
+		anchorCol: number;
+		row: number;
+		col: number;
+	}): [{ row: number; col: number }, { row: number; col: number }] {
+		const firstIsAnchor =
+			selection.anchorRow < selection.row ||
+			(selection.anchorRow === selection.row && selection.anchorCol <= selection.col);
+		return firstIsAnchor
+			? [
+					{ row: selection.anchorRow, col: selection.anchorCol },
+					{ row: selection.row, col: selection.col },
+				]
+			: [
+					{ row: selection.row, col: selection.col },
+					{ row: selection.anchorRow, col: selection.anchorCol },
+				];
+	}
+
+	/** Copy the selected transcript cells (trailing blanks trimmed, escapes stripped) to the app. */
+	#copySelection(): void {
+		const selection = this.#selection;
+		if (!selection) return;
+		const [first, last] = this.#selectionRange(selection);
+		const lines: string[] = [];
+		for (let row = first.row; row <= last.row && row < this.#fsShown.length; row++) {
+			const text = this.#fsShown[row]!;
+			const from = row === first.row ? first.col : 0;
+			const to = row === last.row ? last.col + 1 : this.#fsWidth;
+			lines.push(stripEscapes(sliceColumns(text, from, to)).replace(/\s+$/, ""));
+		}
+		while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+		const copied = lines.join("\n");
+		if (copied.trim() !== "") this.#options.onTranscriptCopy?.(copied);
+	}
+
+	/** A left-drag over the transcript selects; a release copies and clears. False: route the event. */
+	#transcriptMouse(mouse: MouseEvent): boolean {
+		if (!this.#fsActive) return false;
+		if (mouse.action === "press" && mouse.button === "left") {
+			// The dock under the transcript keeps its own clicks (the composer, buttons).
+			if (mouse.row >= this.#fsDockTop) return false;
+			this.#selection = {
+				anchorRow: mouse.row,
+				anchorCol: mouse.col,
+				row: mouse.row,
+				col: mouse.col,
+			};
+			return true;
+		}
+		const selection = this.#selection;
+		if (!selection) return false;
+		if (mouse.action !== "drag" && mouse.action !== "release") return false;
+		selection.row = Math.max(0, Math.min(this.#fsDockTop - 1, mouse.row));
+		selection.col = Math.max(0, Math.min(this.#fsWidth - 1, mouse.col));
+		if (mouse.action === "release") {
+			this.#copySelection();
+			this.#selection = undefined;
+		}
+		return true;
 	}
 
 	/**
@@ -1134,6 +1229,7 @@ export class TermBackend {
 		this.#fsTop = 0;
 		this.#fsMaxTop = 0;
 		this.#fsFollow = true;
+		this.#selection = undefined;
 		if (on) return;
 		this.#replay = true;
 		this.#emitted.clear();
@@ -1144,6 +1240,7 @@ export class TermBackend {
 	/** Scroll the fullscreen transcript: rows (`+` down), or to its start/end. False when the mode is off. */
 	scrollTranscript(by: number | "top" | "bottom"): boolean {
 		if (!this.#fsActive) return false;
+		this.#selection = undefined;
 		if (by === "top") {
 			this.#fsTop = 0;
 			this.#fsFollow = false;
@@ -1211,6 +1308,10 @@ export class TermBackend {
 	}
 
 	#onMouse(mouse: MouseEvent): void {
+		if (this.#transcriptMouse(mouse)) {
+			this.requestRender();
+			return;
+		}
 		if (this.#surface.layer() !== this.#hitLayer) {
 			this.clearHover();
 			return;
