@@ -12,13 +12,15 @@ set -e
 #                  mode takes a release tag (v<version>)
 #   -r <ref>       Shorthand for --ref
 #
-# Prebuilt binaries come from the build service (PI_BUILD_URL, default
-# https://build.stencil.so) and are checked against its sha256 before install.
+# Prebuilt binaries come from this fork's GitHub releases (`PI_RELEASE_REPO`,
+# default si-mods/oh-my-pi) and are checked against the release's
+# SHASUMS256.txt before install. Set PI_BUILD_URL to install from a build
+# service instead (the upstream repository's channel).
 
-REPO="can1357/oh-my-pi"
+REPO="${PI_RELEASE_REPO:-si-mods/oh-my-pi}"
 PACKAGE="@oh-my-pi/pi-coding-agent"
 INSTALL_DIR="${PI_INSTALL_DIR:-$HOME/.local/bin}"
-BUILD_URL="${PI_BUILD_URL:-https://build.stencil.so}"
+BUILD_URL="${PI_BUILD_URL:-}"
 while [ "${BUILD_URL%/}" != "$BUILD_URL" ]; do
     BUILD_URL="${BUILD_URL%/}"
 done
@@ -253,6 +255,95 @@ sha256_of() {
     fi
 }
 
+# Fetch with a GitHub token when one is exported (rate limits, private mirrors).
+github_fetch() {
+    if [ -n "${GH_TOKEN:-}" ]; then
+        curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" "$@"
+    else
+        curl -fsSL "$@"
+    fi
+}
+
+# Resolve VERSION/BINARY/EXPECTED_SHA256/DOWNLOAD_URL from a build service
+# (PI_BUILD_URL): the upstream channel.
+resolve_build_service() {
+    if [ -n "$REF" ]; then
+        if ! printf '%s\n' "$REF" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "Binary installs take a release tag (v<version>) for --ref, got: $REF"
+            echo "For branch/commit installs, use --source with --ref."
+            exit 1
+        fi
+        echo "Fetching omp ${REF#v}..."
+        API_URL="${BUILD_URL}/api/products/omp/versions/${REF#v}/${TARGET}"
+    else
+        echo "Fetching latest release..."
+        API_URL="${BUILD_URL}/api/products/omp/latest/${TARGET}?channel=stable"
+    fi
+    if ! BUILD_JSON=$(curl -fsSL --connect-timeout 10 --max-time 60 "$API_URL"); then
+        echo "Failed to resolve an omp build for ${TARGET} from ${API_URL}"
+        exit 1
+    fi
+    BUILD_JSON=$(printf '%s' "$BUILD_JSON" | tr -d '\r\n')
+
+    VERSION=$(printf '%s\n' "$BUILD_JSON" | json_string version)
+    FILE_JSON=$(printf '%s\n' "$BUILD_JSON" | json_file_object)
+    BINARY=$(printf '%s\n' "$FILE_JSON" | json_string name)
+    EXPECTED_SHA256=$(printf '%s\n' "$FILE_JSON" | json_string sha256)
+    # Go's JSON encoder writes `&` in the presigned URL as \u0026.
+    DOWNLOAD_URL=$(printf '%s\n' "$BUILD_JSON" | json_string download | sed 's/\\u0026/\&/g')
+    if [ -z "$VERSION" ] || [ -z "$BINARY" ] || [ -z "$DOWNLOAD_URL" ] ||
+        ! printf '%s\n' "$EXPECTED_SHA256" | grep -Eq '^[0-9a-f]{64}$'; then
+        echo "Unexpected answer from ${API_URL}"
+        exit 1
+    fi
+}
+
+# Resolve the same four values from this fork's GitHub releases: the tag names
+# the version and SHASUMS256.txt, with the asset, carries its digest.
+resolve_release() {
+    case "$TARGET_ARCH" in
+        x86_64) FILE_ARCH="x64" ;;
+        *)      FILE_ARCH="$TARGET_ARCH" ;;
+    esac
+    case "$PLATFORM" in
+        macos) FILE_PLATFORM="darwin" ;;
+        *)     FILE_PLATFORM="$PLATFORM" ;;
+    esac
+    BINARY="omp-${FILE_PLATFORM}-${FILE_ARCH}"
+
+    if [ -n "$REF" ]; then
+        case "$REF" in
+            v*) TAG="$REF" ;;
+            *)  TAG="v${REF}" ;;
+        esac
+        echo "Fetching omp ${TAG#v}..."
+    else
+        echo "Fetching latest release..."
+        if ! RELEASE_JSON=$(github_fetch --connect-timeout 10 --max-time 60 \
+            "https://api.github.com/repos/${REPO}/releases/latest"); then
+            echo "Failed to read the latest release of ${REPO}"
+            exit 1
+        fi
+        TAG=$(printf '%s\n' "$RELEASE_JSON" | json_string tag_name)
+    fi
+    if ! printf '%s\n' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+        echo "Could not resolve a release tag for ${REPO} (got: ${TAG:-none})"
+        exit 1
+    fi
+    VERSION="${TAG#v}"
+    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${TAG}/${BINARY}"
+    if ! SUMS=$(github_fetch --connect-timeout 10 --max-time 60 \
+        "https://github.com/${REPO}/releases/download/${TAG}/SHASUMS256.txt"); then
+        echo "Release ${TAG} of ${REPO} has no SHASUMS256.txt; refusing an unverified install"
+        exit 1
+    fi
+    EXPECTED_SHA256=$(printf '%s\n' "$SUMS" | awk -v name="$BINARY" '$2 == name { print $1; exit }')
+    if ! printf '%s\n' "$EXPECTED_SHA256" | grep -Eq '^[0-9a-f]{64}$'; then
+        echo "SHASUMS256.txt of ${TAG} names no sha256 for ${BINARY}"
+        exit 1
+    fi
+}
+
 # Install binary from the build service
 install_binary() {
     if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
@@ -283,34 +374,10 @@ install_binary() {
     fi
 
     TARGET="${PLATFORM}-${TARGET_ARCH}"
-    if [ -n "$REF" ]; then
-        if ! printf '%s\n' "$REF" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "Binary installs take a release tag (v<version>) for --ref, got: $REF"
-            echo "For branch/commit installs, use --source with --ref."
-            exit 1
-        fi
-        echo "Fetching omp ${REF#v}..."
-        API_URL="${BUILD_URL}/api/products/omp/versions/${REF#v}/${TARGET}"
+    if [ -n "$BUILD_URL" ]; then
+        resolve_build_service
     else
-        echo "Fetching latest release..."
-        API_URL="${BUILD_URL}/api/products/omp/latest/${TARGET}?channel=stable"
-    fi
-    if ! BUILD_JSON=$(curl -fsSL --connect-timeout 10 --max-time 60 "$API_URL"); then
-        echo "Failed to resolve an omp build for ${TARGET} from ${API_URL}"
-        exit 1
-    fi
-    BUILD_JSON=$(printf '%s' "$BUILD_JSON" | tr -d '\r\n')
-
-    VERSION=$(printf '%s\n' "$BUILD_JSON" | json_string version)
-    FILE_JSON=$(printf '%s\n' "$BUILD_JSON" | json_file_object)
-    BINARY=$(printf '%s\n' "$FILE_JSON" | json_string name)
-    EXPECTED_SHA256=$(printf '%s\n' "$FILE_JSON" | json_string sha256)
-    # Go's JSON encoder writes `&` in the presigned URL as \u0026.
-    DOWNLOAD_URL=$(printf '%s\n' "$BUILD_JSON" | json_string download | sed 's/\\u0026/\&/g')
-    if [ -z "$VERSION" ] || [ -z "$BINARY" ] || [ -z "$DOWNLOAD_URL" ] ||
-        ! printf '%s\n' "$EXPECTED_SHA256" | grep -Eq '^[0-9a-f]{64}$'; then
-        echo "Unexpected answer from ${API_URL}"
-        exit 1
+        resolve_release
     fi
     echo "Using version: $VERSION"
 

@@ -39,6 +39,7 @@ import {
 	downloadBuildFile,
 	type Fetch,
 	fetchBuild,
+	releaseRepo,
 	type UpdateChannel,
 } from "./build-service";
 import { managedInstallName } from "./managed-install";
@@ -55,7 +56,7 @@ import { currentTheme } from "@oh-my-pi/pi-tui/theme/runtime";
 
 const PACKAGE = "@oh-my-pi/pi-coding-agent";
 const HOMEBREW_FORMULA = "can1357/tap/omp";
-const MISE_TOOL = "github:can1357/oh-my-pi";
+const MISE_TOOL = `github:${releaseRepo()}`;
 const NIX_STORE_DIR = "/nix/store";
 const RELEASE_METADATA_TIMEOUT_MS = 30_000;
 
@@ -2072,9 +2073,15 @@ export async function updateViaShimTakeover(
  * a user recovering from a binary-only release straight back through bun.
  */
 function installerHint(): string {
+	const repo = releaseRepo().toLowerCase();
+	if (repo === "can1357/oh-my-pi") {
+		return process.platform === "win32"
+			? "& ([scriptblock]::Create((irm https://omp.sh/install.ps1))) -Binary"
+			: "curl -fsSL https://omp.sh/install | sh -s -- --binary";
+	}
 	return process.platform === "win32"
-		? "& ([scriptblock]::Create((irm https://omp.sh/install.ps1))) -Binary"
-		: "curl -fsSL https://omp.sh/install | sh -s -- --binary";
+		? `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/${repo}/main/scripts/install.ps1))) -Binary`
+		: `curl -fsSL https://raw.githubusercontent.com/${repo}/main/scripts/install.sh | sh -s -- --binary`;
 }
 
 /** Persisted channel, or undefined when settings are unavailable (SDK/test embedding without `Settings.init()`). */

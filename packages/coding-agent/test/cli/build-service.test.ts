@@ -4,6 +4,7 @@ import {
 	type BuildHost,
 	downloadBuildFile,
 	fetchBuild,
+	fetchReleaseBuild,
 	isMuslLinuxForTest,
 	OMP_BUILD,
 	parseBuildAnswer,
@@ -122,6 +123,7 @@ describe("fetchBuild", () => {
 			{ channel: "canary" },
 			{
 				host,
+				repo: "can1357/oh-my-pi",
 				fromVersion: "18.8.8",
 				fetchImpl: async (input, init) => {
 					requests.push({
@@ -151,6 +153,7 @@ describe("fetchBuild", () => {
 			{ version: "18.8.9" },
 			{
 				host,
+				repo: "can1357/oh-my-pi",
 				fetchImpl: async input => {
 					url = String(input);
 					return Response.json(answer());
@@ -165,9 +168,142 @@ describe("fetchBuild", () => {
 		await expect(
 			fetchBuild(
 				{ channel: "stable" },
-				{ host, fetchImpl: async () => Response.json({ error: "no_build" }, { status: 404 }) },
+				{
+					host,
+					repo: "can1357/oh-my-pi",
+					fetchImpl: async () => Response.json({ error: "no_build" }, { status: 404 }),
+				},
 			),
 		).rejects.toThrow("No omp stable build for macos-arm64 is published");
+	});
+});
+
+describe("fetchReleaseBuild", () => {
+	const repo = "acme/omp";
+	const apiBase = "https://api.test";
+	const digest = sha("binary");
+	const assetUrl = "https://github.test/acme/omp/releases/download/v19.3.0/omp-darwin-arm64";
+	const listingUrl = "https://github.test/acme/omp/releases/download/v19.3.0/SHASUMS256.txt";
+
+	/** A release answer with `version`'s asset and, unless `withListing` is false, its checksum file. */
+	function release(version: string, options: { withListing?: boolean; listing?: string } = {}): Response {
+		const file = host.windows ? "omp-darwin-arm64.exe" : fileName;
+		return Response.json({
+			tag_name: `v${version}`,
+			assets: [
+				{ name: file, size: 6, browser_download_url: assetUrl },
+				...(options.withListing === false
+					? []
+					: [{ name: "SHASUMS256.txt", size: 70, browser_download_url: listingUrl }]),
+			],
+		});
+	}
+
+	it("reads the newest release's asset and its checksum listing", async () => {
+		const requests: string[] = [];
+		const build = await fetchReleaseBuild(
+			{ channel: "stable" },
+			{
+				repo,
+				apiBase,
+				host,
+				fetchImpl: async input => {
+					const url = String(input);
+					requests.push(url);
+					if (url === `${apiBase}/repos/${repo}/releases/latest`) return release("19.3.0");
+					if (url === listingUrl) return new Response(`${digest}  ${fileName}\n${sha("other")}  other\n`);
+					return new Response("unexpected", { status: 500 });
+				},
+			},
+		);
+
+		expect(build).toEqual({
+			version: "19.3.0",
+			file: { name: fileName, size: 6, sha256: digest },
+			download: assetUrl,
+		});
+		expect(requests).toEqual([`${apiBase}/repos/${repo}/releases/latest`, listingUrl]);
+	});
+
+	it("asks for the tag of one exact version", async () => {
+		let url = "";
+		await fetchReleaseBuild(
+			{ version: "19.3.0" },
+			{
+				repo,
+				apiBase,
+				host,
+				fetchImpl: async input => {
+					if (!url) {
+						url = String(input);
+						return release("19.3.0");
+					}
+					return new Response(`${digest}  ${fileName}\n`);
+				},
+			},
+		);
+		expect(url).toBe(`${apiBase}/repos/${repo}/releases/tags/v19.3.0`);
+	});
+
+	it("refuses a release without a checksum listing", async () => {
+		await expect(
+			fetchReleaseBuild(
+				{ channel: "stable" },
+				{ repo, apiBase, host, fetchImpl: async () => release("19.3.0", { withListing: false }) },
+			),
+		).rejects.toThrow("no SHASUMS256.txt");
+	});
+
+	it("refuses a listing that names no digest for the asset", async () => {
+		await expect(
+			fetchReleaseBuild(
+				{ channel: "stable" },
+				{
+					repo,
+					apiBase,
+					host,
+					fetchImpl: async input =>
+						String(input).endsWith("/latest") ? release("19.3.0") : new Response(`${digest}  other\n`),
+				},
+			),
+		).rejects.toThrow(`names no sha256 for ${fileName}`);
+	});
+
+	it("explains an empty repository", async () => {
+		await expect(
+			fetchReleaseBuild(
+				{ channel: "stable" },
+				{ repo, apiBase, host, fetchImpl: async () => new Response("{}", { status: 404 }) },
+			),
+		).rejects.toThrow(`No omp stable release for macos-arm64 is published on ${repo} yet`);
+	});
+
+	it("routes fetchBuild to GitHub releases for a fork's repository", async () => {
+		const previousApi = process.env.PI_GITHUB_API;
+		process.env.PI_GITHUB_API = apiBase;
+		const requests: string[] = [];
+		try {
+			const build = await fetchBuild(
+				{ channel: "stable" },
+				{
+					repo,
+					host,
+					fetchImpl: async input => {
+						const url = String(input);
+						requests.push(url);
+						if (url.startsWith(`${apiBase}/repos/`)) return release("19.3.0");
+						if (url === listingUrl) return new Response(`${digest}  ${fileName}\n`);
+						return new Response("unexpected", { status: 500 });
+					},
+				},
+			);
+			expect(build.version).toBe("19.3.0");
+		} finally {
+			if (previousApi === undefined) delete process.env.PI_GITHUB_API;
+			else process.env.PI_GITHUB_API = previousApi;
+		}
+		expect(requests[0]).toContain(`${repo}/releases/latest`);
+		expect(requests.every(url => !url.includes("build.stencil.so"))).toBe(true);
 	});
 });
 
