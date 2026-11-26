@@ -699,6 +699,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		shellVisualization: signal(true),
 		mcpMarkdown: signal(false),
 		readPreview: signal(true),
+		focus: signal(false),
 	};
 
 	isInitialized = false;
@@ -721,6 +722,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	toggleFocusView(): void {
 		const on = !cfgDisplayFocus.get(this.settings);
 		cfgDisplayFocus.set(this.settings, on);
+		this.#display.focus.set(on);
 		this.shell.transcript.setFocus(on);
 		this.showStatus(on ? "Focus view: last turn" : "Focus view off");
 	}

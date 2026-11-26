@@ -478,6 +478,7 @@ export function createInteractiveModeContext(overrides: ContextOverrides = {}): 
 				shellVisualization: signal(true),
 				mcpMarkdown: signal(false),
 				readPreview: signal(false),
+				focus: signal(false),
 			},
 			pendingShellRuns: new ViewList(),
 			linkTargets: () => getAssistantMessageLinkTargets(built),
