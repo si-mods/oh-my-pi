@@ -59,19 +59,21 @@ jobs:
          - name: Sign the macOS binary
            run: bash scripts/ci-macos-sign.sh "packages/coding-agent/dist/omp-${{ matrix.target }}"
 
-         - name: Checksum
+         - name: Package
            run: |
               set -euo pipefail
               binary="packages/coding-agent/dist/omp-${{ matrix.target }}"
-              sha256sum "$binary" | sed "s|.*/||" > "omp-${{ matrix.target }}.sha256"
+              name="$(basename "$binary")"
+              mkdir -p out
+              cp "$binary" "out/${name}"
+              (cd out && sha256sum "${name}" > "${name}.sha256")
+              cat "out/${name}.sha256"
               file "$binary"
 
          - uses: actions/upload-artifact@v4
            with:
               name: omp-${{ matrix.target }}
-              path: |
-                 packages/coding-agent/dist/omp-${{ matrix.target }}
-                 omp-${{ matrix.target }}.sha256
+              path: out/
               if-no-files-found: error
 
    publish:
@@ -100,6 +102,9 @@ jobs:
               tag="v${version}"
               cat dist/*.sha256 > SHASUMS256.txt
               cat SHASUMS256.txt
+              grep -Eq '^[0-9a-f]{64}  omp-' SHASUMS256.txt || { echo "SHASUMS256.txt has no digest lines" >&2; exit 1; }
+              test -f dist/omp-darwin-arm64 || { echo "arm64 asset missing" >&2; ls -R dist; exit 1; }
+              test -f dist/omp-darwin-x64 || { echo "x64 asset missing" >&2; ls -R dist; exit 1; }
               if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
                 gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber \
                   dist/omp-darwin-arm64 dist/omp-darwin-x64 SHASUMS256.txt
