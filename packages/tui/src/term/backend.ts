@@ -1168,6 +1168,9 @@ export class TermBackend {
 			const to = row === last.row ? last.col + 1 : this.#fsWidth;
 			if (to <= from) continue;
 			const text = rows[row]!;
+			// Re-slicing a row that carries graphics or a terminal envelope can change what it draws
+			// (an image or OSC 66 span cut short), which reflows the line under the pointer. Leave it.
+			if (text.includes("\x1b]") || text.includes("\x1bP") || text.includes("\x1b_G")) continue;
 			rows[row] =
 				`${sliceColumns(text, 0, from)}\x1b[7m${sliceColumns(text, from, to)}\x1b[27m${sliceColumns(text, to, this.#fsWidth)}`;
 		}
@@ -1218,6 +1221,9 @@ export class TermBackend {
 			// The dock under the transcript keeps its own clicks (the composer, buttons); the
 			// indicator row is ours and jumps to the tail on a click.
 			if (mouse.row >= this.#fsDockTop && mouse.row !== this.#fsIndicatorAt) return false;
+			// Pin the window for the drag: rows that stream in while the pointer is down must not
+			// shift the text under it. The indicator row offers the way back to the tail.
+			this.#fsFollow = false;
 			this.#selection = {
 				anchorRow: mouse.row,
 				anchorCol: mouse.col,
