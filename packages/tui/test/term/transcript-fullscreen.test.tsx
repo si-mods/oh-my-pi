@@ -8,6 +8,7 @@ import { describe, expect, it } from "bun:test";
 import { type Signal, type UiNode, signal } from "@oh-my-pi/pi-tui";
 import { settle } from "@oh-my-pi/pi-tui/surface";
 import { createTestTerminal, type TestTerminal } from "@oh-my-pi/pi-tui/testing/terminal";
+import { defineRolePainter } from "@oh-my-pi/pi-tui/term/paint";
 
 interface Transcript {
 	readonly term: TestTerminal;
@@ -305,6 +306,54 @@ describe("fullscreen transcript card heads", () => {
 		term.mouse({ row: border, col: 2, button: "left", action: "press", mods: [] });
 		term.mouse({ row: border, col: 2, button: "left", action: "release", mods: [] });
 		expect(acts).toEqual(["omp.toggle"]);
+		term.dispose();
+	});
+});
+
+describe("fullscreen transcript selection stability", () => {
+	it("holds the rows under the pointer while new output streams in", () => {
+		const blocks = signal<UiNode[]>(
+			["a", "b", "c", "d", "e", "f", "g", "h"].map(line => (<text text={line} />) as UiNode),
+		);
+		for (const node of blocks.peek()) settle(node);
+		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
+			columns: 20,
+			rows: 6,
+			transcriptFullscreen: true,
+		});
+		const before = term.screen();
+		expect(before[4]).toBe("h");
+
+		term.mouse({ row: 4, col: 0, button: "left", action: "press", mods: [] });
+		const next = (<text text="i" />) as UiNode;
+		settle(next);
+		blocks.set([...blocks.peek(), next]);
+		term.render();
+
+		// The indicator takes one content row, but the rows themselves do not move.
+		expect(term.screen().slice(0, 4)).toEqual(before.slice(0, 4));
+		expect(term.backend.transcriptScroll()?.following).toBe(false);
+		expect(term.screen().some(line => line.includes("more line"))).toBe(true);
+		term.dispose();
+	});
+
+	it("leaves a hyperlink row unsliced when the selection covers it", () => {
+		defineRolePainter("text", "test.link", () => ({
+			rows: ["\x1b]8;;https://example.test\x07LINK\x1b]8;;\x07"],
+		}));
+		const node = (<text role="test.link" />) as UiNode;
+		settle(node);
+		const blocks = signal<UiNode[]>([node]);
+		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
+			columns: 20,
+			rows: 4,
+			transcriptFullscreen: true,
+		});
+		const row = term.screen().findIndex(line => line.includes("LINK"));
+		expect(row).toBeGreaterThanOrEqual(0);
+		term.mouse({ row, col: 0, button: "left", action: "press", mods: [] });
+		term.mouse({ row, col: 3, button: "left", action: "drag", mods: [] });
+		expect(term.rows().some(line => line.includes("\x1b[7m"))).toBe(false);
 		term.dispose();
 	});
 });

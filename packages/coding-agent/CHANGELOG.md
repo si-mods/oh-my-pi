@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Selecting text in the fullscreen transcript no longer jumps: starting a drag pins the window, so output that streams in while the button is down cannot pull rows out from under the pointer (the `↓ N more lines` row returns to the tail), and rows carrying links or graphics are left unsliced so the highlight cannot reflow them.
 - Clicking a collapsed tool card's head expands it: the click target now sits on the card's first row with content (a padded painter used to put it on a blank row the transcript trims), and the block wrapper drops hits that fall into trimmed rows. Verified end to end on macOS: `seq 1 120` shows six rows, a click on the head shows 98–120 with the hint gone.
 - Release binaries embed the native addon published as 19.2.1: the 19.2.0 npm package predates `heldProcesses`, so a finished turn warned `shell.heldProcesses is not a function` and held process cleanup did nothing.
 - A renamed copy of the binary updates itself: `ompdev update` replaces the `ompdev` that is running instead of whichever `omp` comes first on PATH. Plain `omp` installs resolve exactly as before.
