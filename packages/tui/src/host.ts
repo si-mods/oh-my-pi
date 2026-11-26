@@ -26,7 +26,7 @@ import { encodeHelloQuery, NativeSurfaces, TspConnection } from "./native";
 import { isTernPane } from "./driver/caps/identity";
 import type { UiNode } from "./node";
 import type { Surface } from "./surface";
-import { driverImages, TermBackend } from "./term/backend";
+import { driverImages, type SidePanelSource, TermBackend } from "./term/backend";
 import type { Theme } from "./theme/contract";
 import type { FramePlan, InputEvent, TerminalDriver } from "./driver/contract";
 import type { MouseTracking } from "./driver/io";
@@ -148,6 +148,8 @@ export interface Host {
 	searchState(): { readonly query: string; readonly index: number; readonly count: number } | undefined;
 	/** The main region's nodes changed wholesale (a view filter): repaint the fullscreen transcript. */
 	invalidateTranscriptCache(): void;
+	/** Open, replace or close the right-hand column beside the fullscreen transcript. */
+	setSidePanel(panel: SidePanelSource | undefined): void;
 	/** Whether the terminal advertises TSP feature `name` (reactive; always false in the terminal renderer). */
 	feature(name: string): boolean;
 	/**
@@ -254,6 +256,7 @@ type Renderer = Pick<
 	| "nextSearchMatch"
 	| "searchState"
 	| "invalidateTranscriptCache"
+	| "setSidePanel"
 > & {
 	/** Stop rendering and release the renderer (not the driver). */
 	stop(): void;
@@ -388,6 +391,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
 			nextSearchMatch: () => undefined,
 			searchState: () => undefined,
 			invalidateTranscriptCache: () => {},
+			setSidePanel: () => {},
 			feature: name => connection.hasFeature(name),
 			checkoutShown: () => connection.checkout(),
 			setMouse: tracking => driver.setMouse(tracking),
@@ -453,6 +457,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
 			nextSearchMatch: delta => backend.nextSearchMatch(delta),
 			searchState: () => backend.searchState(),
 			invalidateTranscriptCache: () => backend.invalidateTranscriptCache(),
+			setSidePanel: panel => backend.setSidePanel(panel),
 			feature: () => false,
 			checkoutShown: () => false,
 			setMouse(tracking) {
@@ -503,6 +508,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
 		nextSearchMatch: delta => renderer.nextSearchMatch(delta),
 		searchState: () => renderer.searchState(),
 		invalidateTranscriptCache: () => renderer.invalidateTranscriptCache(),
+		setSidePanel: panel => renderer.setSidePanel(panel),
 		feature: name => renderer.feature(name),
 		checkoutShown: () => renderer.checkoutShown(),
 		suspend: run => renderer.suspend(run),

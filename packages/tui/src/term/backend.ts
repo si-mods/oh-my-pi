@@ -105,6 +105,16 @@ export interface TermBackendOptions {
 	readonly onTranscriptCopy?: (text: string) => void;
 }
 
+/** A side column beside the fullscreen transcript. */
+export interface SidePanelSource {
+	/** Rows to show, from the top (the backend windows them by `scroll`). */
+	readonly lines: Accessor<readonly string[]>;
+	/** First row shown; defaults to 0. */
+	readonly scroll?: Accessor<number>;
+	/** Share of the terminal width, clamped to 0.25–0.7. Default 0.42. */
+	readonly fraction?: number;
+}
+
 /** A history batch offered to the driver until it acknowledges the id. */
 interface PendingBatch {
 	readonly id: number;
@@ -387,6 +397,14 @@ export class TermBackend {
 	#fsLiveRows: string[] = [];
 	/** The active transcript search: the lowercased query, matching absolute rows, and the current one. */
 	#search: { query: string; rows: number[]; index: number } | undefined;
+	/** Width the transcript took in the last side-panel frame (the panel's columns start there). */
+	#fsBodyWidth = 0;
+	/**
+	 * A right-hand column beside the fullscreen transcript (a diff panel): its lines, scrolled by the
+	 * app, and the share of the width it takes (default 0.42). Drawn in the same frame, so it needs
+	 * nothing from the terminal; the transcript is laid out at the remaining width.
+	 */
+	#sidePanel: SidePanelSource | undefined;
 	/** Whether the last composed frame was a fullscreen transcript frame (the mode may change at runtime). */
 	#fsActive = false;
 
@@ -748,14 +766,29 @@ export class TermBackend {
 		if (transcriptOn !== this.#fsActive) this.#switchTranscriptMode(transcriptOn);
 		const fullscreenAt = layer.findLastIndex(isFullscreen);
 		if (transcriptOn && !flush) {
-			const composed = this.#composeTranscript(width, height);
+			const panel = flush ? undefined : this.#sidePanel;
+			const panelWidth = panel
+				? Math.max(
+						20,
+						Math.min(
+							Math.floor(width * 0.7),
+							Math.round(width * Math.min(0.7, Math.max(0.25, panel.fraction ?? 0.42))),
+						),
+					)
+				: 0;
+			const bodyWidth = panel ? Math.max(10, width - panelWidth - 1) : width;
+			this.#fsBodyWidth = bodyWidth;
+			const composed = this.#composeTranscript(bodyWidth, height);
+			const rows = panel
+				? this.#spliceSidePanel(composed.rows, panel, bodyWidth, panelWidth, height)
+				: composed.rows;
 			cursor = composed.cursor;
 			hits.push(...composed.hits);
-			for (const node of layer) place(composed.rows, node);
+			for (const node of layer) place(rows, node);
 			this.#hits = hits;
 			// The normal screen stays as it was under the alternate one.
 			this.#nextPin = this.#pin;
-			return { viewport: [], cursor, fullscreen: composed.rows };
+			return { viewport: [], cursor, fullscreen: rows };
 		}
 		if (fullscreenAt !== -1) {
 			const block = this.#paint(layer[fullscreenAt]!, width, height);
@@ -1294,8 +1327,10 @@ export class TermBackend {
 		if (!this.#fsActive) return false;
 		if (mouse.action === "press" && mouse.button === "left") {
 			// The dock under the transcript keeps its own clicks (the composer, buttons); the
-			// indicator row is ours and jumps to the tail on a click.
+			// indicator row is ours and jumps to the tail on a click; the side panel's columns
+			// belong to the app that draws it.
 			if (mouse.row >= this.#fsDockTop && mouse.row !== this.#fsIndicatorAt) return false;
+			if (this.#sidePanel && mouse.col >= this.#fsBodyWidth) return false;
 			// Pin the window for the drag: rows that stream in while the pointer is down must not
 			// shift the text under it. The indicator row offers the way back to the tail.
 			this.#fsFollow = false;
@@ -1364,6 +1399,32 @@ export class TermBackend {
 		}
 		this.requestRender();
 		return true;
+	}
+
+	/** Open or close the side column; the transcript's layout width changes with it. */
+	setSidePanel(panel: SidePanelSource | undefined): void {
+		this.#sidePanel = panel;
+		this.#invalidateTranscript();
+		this.requestRender();
+	}
+
+	/** Draw `panel` in the right-hand columns, a vertical rule between it and the transcript. */
+	#spliceSidePanel(
+		rows: readonly string[],
+		panel: SidePanelSource,
+		bodyWidth: number,
+		panelWidth: number,
+		height: number,
+	): string[] {
+		const lines = panel.lines();
+		const scroll = Math.max(0, panel.scroll?.() ?? 0);
+		const out: string[] = [];
+		for (let row = 0; row < height; row++) {
+			const left = rows[row] ?? "";
+			const right = lines[scroll + row] ?? "";
+			out.push(`${padTo(truncate(left, bodyWidth, ""), bodyWidth)}\u2502${truncate(right, panelWidth, "")}`);
+		}
+		return out;
 	}
 
 	/** Repaint the settled transcript from its nodes on the next frame (the main list changed under it). */
