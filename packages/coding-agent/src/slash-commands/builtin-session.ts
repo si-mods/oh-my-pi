@@ -599,6 +599,15 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	{
+		name: "diff",
+		icon: "branch",
+		description: "Show the working tree's changes in a panel under the conversation",
+		handleTui: (_command, runtime) => {
+			runtime.ctx.showDiffPanel();
+			clearSubmittedText(runtime);
+		},
+	},
+	{
 		name: "git",
 		icon: "branch",
 		description: "Open the git UI (split diff viewer, staging, commit composer)",
