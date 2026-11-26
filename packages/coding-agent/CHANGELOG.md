@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Release binaries embed the native addon published as 19.2.1: the 19.2.0 npm package predates `heldProcesses`, so a finished turn warned `shell.heldProcesses is not a function` and held process cleanup did nothing.
 - A renamed copy of the binary updates itself: `ompdev update` replaces the `ompdev` that is running instead of whichever `omp` comes first on PATH. Plain `omp` installs resolve exactly as before.
 - Fixed files and directories whose name starts with `..` being treated as outside their parent: a working directory under such a folder now counts as part of its checkout, and scoped settings, plugin roots and folder restrictions apply to it ([#20482](https://github.com/can1357/oh-my-pi/pull/20482) by [@H4vC](https://github.com/H4vC))
 
