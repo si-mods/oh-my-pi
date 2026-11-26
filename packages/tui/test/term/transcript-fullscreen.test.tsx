@@ -190,3 +190,88 @@ describe("fullscreen transcript selection", () => {
 		term.dispose();
 	});
 });
+
+describe("fullscreen transcript clicks", () => {
+	it("routes a click on a settled block's button to its action", () => {
+		const acts: string[] = [];
+		const button = (<button text="Go" actions={{ click: "go" }} onAction={act => acts.push(act)} />) as UiNode;
+		settle(button);
+		const blocks = signal<UiNode[]>([
+			...["one", "two", "three"].map(line => (<text text={line} />) as UiNode),
+			button,
+		]);
+		for (const node of blocks.peek()) settle(node);
+		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
+			columns: 20,
+			rows: 6,
+			transcriptFullscreen: true,
+		});
+
+		const row = term.screen().findIndex(line => line.includes("Go"));
+		expect(row).toBeGreaterThanOrEqual(0);
+		term.mouse({ row, col: 1, button: "left", action: "press", mods: [] });
+		term.mouse({ row, col: 1, button: "left", action: "release", mods: [] });
+
+		expect(acts).toEqual(["go"]);
+		term.dispose();
+	});
+
+	it("jumps to the tail when the indicator row is clicked", () => {
+		const blocks = signal<UiNode[]>(
+			["a", "b", "c", "d", "e", "f", "g", "h"].map(line => (<text text={line} />) as UiNode),
+		);
+		for (const node of blocks.peek()) settle(node);
+		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
+			columns: 20,
+			rows: 6,
+			transcriptFullscreen: true,
+		});
+
+		term.backend.scrollTranscript(-4);
+		term.render();
+		const indicator = term.screen().findIndex(line => line.includes("more lines"));
+		expect(indicator).toBeGreaterThanOrEqual(0);
+		term.mouse({ row: indicator, col: 2, button: "left", action: "press", mods: [] });
+		term.mouse({ row: indicator, col: 2, button: "left", action: "release", mods: [] });
+
+		expect(term.backend.transcriptScroll()?.following).toBe(true);
+		expect(term.screen().some(line => line.includes("more lines"))).toBe(false);
+		term.dispose();
+	});
+});
+
+describe("fullscreen transcript expanders", () => {
+	it("bubbles a click on a collapsed tool's head as the expand action", () => {
+		const acts: string[] = [];
+		const tool = (
+			<tool
+				name="bash"
+				title="seq 1 3"
+				status="done"
+				frame="inline"
+				collapsible
+				collapsed
+				preview="none"
+				onAction={act => acts.push(act)}
+			>
+				<text text="1" />
+			</tool>
+		) as UiNode;
+		const blocks = signal<UiNode[]>(["one", "two"].map(line => (<text text={line} />) as UiNode));
+		blocks.set([...blocks.peek(), tool]);
+		for (const node of blocks.peek()) settle(node);
+		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
+			columns: 30,
+			rows: 8,
+			transcriptFullscreen: true,
+		});
+
+		const head = term.screen().findIndex(line => line.includes("seq 1 3"));
+		expect(head).toBeGreaterThanOrEqual(0);
+		term.mouse({ row: head, col: 1, button: "left", action: "press", mods: [] });
+		term.mouse({ row: head, col: 1, button: "left", action: "release", mods: [] });
+
+		expect(acts).toEqual(["omp.toggle"]);
+		term.dispose();
+	});
+});

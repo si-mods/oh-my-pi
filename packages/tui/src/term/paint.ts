@@ -148,6 +148,9 @@ export type Painter = (node: UiNode, cx: PaintContext) => Block;
 /** The empty block (hidden nodes, zero-size allocations). */
 export const EMPTY_BLOCK: Block = Object.freeze({ rows: Object.freeze([]) as readonly string[] });
 
+/** The action a collapsible tool's collapsed header emits on a click: expand the block. */
+export const TOOL_TOGGLE_ACT = "omp.toggle";
+
 const kindPainters = new Map<UiKind, Painter>();
 const rolePainters = new Map<string, Painter>();
 /** How often each `kind|role` key was registered: a second registration silently wins by load order. */

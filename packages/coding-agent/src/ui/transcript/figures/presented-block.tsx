@@ -14,6 +14,7 @@
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { computed, type JSXNode, type Reactive, read, resolveChildren, type UiNode, untrack } from "@oh-my-pi/pi-tui";
 import { stripEscapes } from "@oh-my-pi/pi-tui/text/ansi";
+import { TOOL_TOGGLE_ACT } from "@oh-my-pi/pi-tui/term/paint";
 import type { TspSpan, TspText, TspToolProps } from "@oh-my-pi/pi-wire";
 import type { TranscriptBlock, TranscriptPresentation } from "../../../extensibility/extensions/render-types";
 
@@ -245,6 +246,10 @@ function compactNode(
 			collapsible
 			collapsed
 			onToggle={onToggle}
+			onAction={act => {
+				// The collapsed head is the expander; the expand key does the same.
+				if (act === TOOL_TOGGLE_ACT) onToggle(false);
+			}}
 			preview={spec ? { lines: rows.length } : "none"}
 			hidden={hidden}
 			term={term}
