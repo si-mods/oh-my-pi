@@ -275,6 +275,9 @@ export function bracketed(theme: Theme, text: string): string {
 /** Collapsed command/code previews show at most this many rows (the viewport tail window). */
 export const PREVIEW_WINDOW_ROWS = 20;
 
+/** Output rows a collapsed tool card previews (a click or the expand key shows the rest). */
+export const PREVIEW_OUTPUT_ROWS = 6;
+
 /** `content` wrapped beside `prefix` (first row) and `continuation` (later rows). */
 export function hangingWrap(prefix: string, continuation: string, content: string, width: number): string[] {
 	const lead = Math.max(visibleWidth(prefix), visibleWidth(continuation));

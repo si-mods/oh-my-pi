@@ -13,6 +13,7 @@ import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { type Accessor, computed, type JSXNode, type KeyEvent, type Signal, signal, untrack } from "@oh-my-pi/pi-tui";
 import { registerBlob } from "@oh-my-pi/pi-tui/native/blobs";
 import { truncate, visibleWidth } from "@oh-my-pi/pi-tui/text/width";
+import { TOOL_TOGGLE_ACT } from "@oh-my-pi/pi-tui/term/paint";
 import { currentTheme } from "@oh-my-pi/pi-tui/theme/runtime";
 import type { TspCardStatus, TspTone } from "@oh-my-pi/pi-wire";
 import type { MinimizedMeta, TruncationMeta } from "../../tools/output-meta-format";
@@ -295,6 +296,10 @@ export function ExecRunBlock(props: { readonly run: ExecRun }): JSXNode {
 			preview="children"
 			term={term}
 			onToggle={collapsed => run.toggle(collapsed)}
+			onAction={act => {
+				// A click on a collapsed card's head expands it, like the expand key.
+				if (act === TOOL_TOGGLE_ACT) run.toggle(false);
+			}}
 		>
 			{() => {
 				const state = RUN_STATE[facts().status];

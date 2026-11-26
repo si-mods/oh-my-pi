@@ -22,6 +22,7 @@ import {
 	capLines,
 	frameInner,
 	frameRows,
+	PREVIEW_OUTPUT_ROWS,
 	PREVIEW_WINDOW_ROWS,
 	runningMs,
 	type StatusLine,
@@ -136,7 +137,7 @@ function paintBash(node: UiNode, cx: PaintContext): Block {
 	const printed = nodeText(findChild(node, "output"));
 	const output = withoutDrawnPlaceholders(printed, props.term?.imageLinks, resultPictures(node, cx).length);
 	const outputLines = output.trim().length > 0 ? ansiLines(output).map(line => theme.fg("toolOutput", line)) : [];
-	const limit = Math.min(term.previewLines ?? PREVIEW_WINDOW_ROWS, PREVIEW_WINDOW_ROWS);
+	const limit = Math.min(term.previewLines ?? PREVIEW_OUTPUT_ROWS, PREVIEW_OUTPUT_ROWS);
 	const shown = expanded ? outputLines : tailRows(theme, outputLines, limit, frameInner(width));
 	if (term.warning) shown.push(theme.fg("warning", bracketed(theme, term.warning)));
 	const stats = (term.stats ?? []).map(stat => statText(theme, stat));

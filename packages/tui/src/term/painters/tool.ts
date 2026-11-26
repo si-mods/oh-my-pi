@@ -73,7 +73,13 @@ definePainter("tool", (node, cx): Block => {
 		};
 	}
 	const body = disclosed(theme, bodyRows(node, cx, cx.width - 4), collapsed, props.preview);
+	const rows = boxRows(theme, body, cx.width, head, borderOf(props.tone, props.status));
+	// The card's head sits in its top border: a click there expands, like the inline head.
+	const expandable = props.collapsible === true && collapsed && rows.length > 0;
 	return {
-		rows: boxRows(theme, body, cx.width, head, borderOf(props.tone, props.status)),
+		rows,
+		hits: expandable
+			? [{ row: 0, col: 0, width: visibleWidth(rows[0]!), height: 1, node, act: TOOL_TOGGLE_ACT }]
+			: [],
 	};
 });

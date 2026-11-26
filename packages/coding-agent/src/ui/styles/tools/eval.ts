@@ -25,7 +25,7 @@ import { type EvalTerm, type EvalTermCell, formatMcpProgress, highlightLanguage,
 import { styledModelBadge } from "./agent-common";
 import { resultPictures, withoutDrawnPlaceholders } from "./file-common";
 import { codeCellRows } from "./code-cell";
-import { bracketed, frameInner, PREVIEW_WINDOW_ROWS } from "./frame";
+import { bracketed, frameInner, PREVIEW_OUTPUT_ROWS, PREVIEW_WINDOW_ROWS } from "./frame";
 import { COLLAPSED_TREE, EXPANDED_TREE, jsonTreeRows } from "./json-tree";
 import { defineToolLook, isExpanded, toolProps } from "./look";
 
@@ -453,7 +453,7 @@ function paintEval(node: UiNode, cx: PaintContext): Block {
 		});
 		return { rows };
 	}
-	const previewLines = Math.min(term.previewLines ?? 10, PREVIEW_WINDOW_ROWS);
+	const previewLines = Math.min(term.previewLines ?? PREVIEW_OUTPUT_ROWS, PREVIEW_OUTPUT_ROWS);
 	const notes = callNotes(theme, term);
 	if (term.phase === "cells") {
 		const rows: string[] = [];
