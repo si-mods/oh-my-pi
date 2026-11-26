@@ -19,7 +19,7 @@
 ### Added
 
 - `/diff` opens the working tree's changes in a panel under the conversation (the sheet is one node, as overlays require): status lines and the unified diff, `j`/`k`/`PgUp`/`PgDn`/`g`/`G` to scroll, `r` to refresh, `Esc`/`q` to close.
-- `/focus` tool summaries expand again with the expand key or Ctrl+T: the fullscreen transcript repaints its settled rows when the expansion flag flips.
+- `/focus` tool summaries expand when their head is clicked (the block's own expansion wins over the summary), and with the expand key or Ctrl+T: the fullscreen transcript repaints its settled rows when the expansion flag flips.
 - `/focus` (setting `display.focus`) shows only the last turn of the transcript, and inside it every tool call is one line — the file it touched plus a `+N −M` diffstat for edits, the first line of a command — until the expand key opens it fully; shows only the last turn of the transcript — its prompt, the tool cards under it, and the answer — and hides earlier turns; run it again for the whole conversation. The setting persists, and the fullscreen transcript repaints when it flips.
 - In-app transcript search: `Ctrl+R` in the fullscreen transcript opens a one-line search over settled and live rows, highlights every match in place, shows `index/count`, steps through matches with `Enter` (wrapping), and pauses following while it is open.
 - A collapsed tool card previews at most 6 output rows (was 20); clicking its head, or the expand key, shows the rest. Every collapsible tool head carries the click target, whichever style painter drew it (inline rows, cards, `!`/`$` runs).

@@ -465,7 +465,8 @@ export class TranscriptPresenter {
 			});
 			effect(() => {
 				const answered = toolPresentation(answer());
-				if (!display.focus() || display.toolOutputExpanded()) {
+				// A block expanded on its own (a click on its head) keeps its full card in focus mode too.
+				if (!display.focus() || display.toolOutputExpanded() || call.facts.expanded()) {
 					untrack(() => call.setPresentation(answered));
 					return;
 				}
