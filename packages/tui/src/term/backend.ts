@@ -344,7 +344,7 @@ export class TermBackend {
 	readonly #retiring = new Set<UiNode>();
 	#nextPin: Pin | undefined;
 	#nextHistoryId = 1;
-	#hits: { readonly hit: Hit; readonly top: number; readonly left: number }[] = [];
+	#hits: { readonly hit: Hit; readonly top: number; readonly left: number; readonly transcript?: boolean }[] = [];
 	/** Layer stack these hits were painted for; queued reports cannot click through a newly opened modal. */
 	#hitLayer: readonly UiNode[] | undefined;
 	/** The driver lost history: the next frame replays the committed ledger. */
@@ -379,6 +379,10 @@ export class TermBackend {
 	#fsDockTop = 0;
 	/** The transcript rows the last fullscreen frame showed: what a selection copies from. */
 	#fsShown: string[] = [];
+	/** Clickable rows of the settled prefix, in absolute transcript rows (append-only with {@link #fsRows}). */
+	#fsHits: { hit: Hit; row: number }[] = [];
+	/** Screen row of the "jump to bottom" indicator this frame, or -1 (a click there follows the tail). */
+	#fsIndicatorAt = -1;
 	/** Whether the last composed frame was a fullscreen transcript frame (the mode may change at runtime). */
 	#fsActive = false;
 
@@ -1058,11 +1062,16 @@ export class TermBackend {
 	#composeTranscript(
 		width: number,
 		height: number,
-	): { rows: string[]; cursor: Cell | null; hits: { hit: Hit; top: number; left: number }[] } {
+	): {
+		rows: string[];
+		cursor: Cell | null;
+		hits: { hit: Hit; top: number; left: number; transcript?: boolean }[];
+	} {
 		const main = this.#surface.main();
 		const separator = this.#options.separator ?? (() => 1);
 		if (this.#fsWidth !== width) {
 			this.#fsRows = [];
+			this.#fsHits = [];
 			this.#fsLast = undefined;
 			this.#fsSettled = 0;
 			this.#fsWidth = width;
@@ -1074,17 +1083,22 @@ export class TermBackend {
 			const block = this.#paint(node, width);
 			if (block.rows.length === 0) continue;
 			if (this.#fsLast) for (let n = separator(this.#fsLast, node); n > 0; n--) this.#fsRows.push("");
+			const base = this.#fsRows.length;
 			this.#fsRows.push(...block.rows);
+			for (const hit of block.hits ?? []) this.#fsHits.push({ hit, row: base + hit.row });
 			this.#fsLast = node;
 		}
 		const live: string[] = [];
+		const liveHits: { hit: Hit; row: number }[] = [];
 		let last = this.#fsLast;
 		for (let i = this.#fsSettled; i < main.length; i++) {
 			const node = main[i]!;
 			const block = this.#paint(node, width);
 			if (block.rows.length === 0) continue;
 			if (last) for (let n = separator(last, node); n > 0; n--) live.push("");
+			const base = this.#fsRows.length + live.length;
 			live.push(...block.rows);
+			for (const hit of block.hits ?? []) liveHits.push({ hit, row: base + hit.row });
 			last = node;
 		}
 
@@ -1108,17 +1122,24 @@ export class TermBackend {
 		for (let i = top; i < Math.min(total, top + contentHeight); i++) {
 			body.push(i < settled.length ? settled[i]! : live[i - settled.length]!);
 		}
+		const shownRows = body.length;
 		// A short transcript hugs the dock, like a shell prompt at the bottom of the screen.
 		while (body.length < contentHeight) body.unshift("");
+		const padding = contentHeight - shownRows;
 		const rows = [...body];
 		if (indicatorRows > 0) {
 			const count = `↓ ${below} more line${below === 1 ? "" : "s"}`;
-			const hint = " · Ctrl+End";
+			const hint = " · click or Ctrl+End";
 			const text = visibleWidth(count + hint) <= width ? count + hint : count;
 			const pad = Math.max(0, width - visibleWidth(text) - 1);
 			rows.push(truncate(`${" ".repeat(pad)}${text}`, width, ""));
 		}
-		const hits: { hit: Hit; top: number; left: number }[] = [];
+		const hits: { hit: Hit; top: number; left: number; transcript?: boolean }[] = [];
+		for (const { hit, row } of [...this.#fsHits, ...liveHits]) {
+			// Screen rows run over the padded body: a short transcript's rows sit below the blanks.
+			const screen = row - top + padding;
+			if (screen >= 0 && screen < contentHeight) hits.push({ hit, top: screen, left: 0, transcript: true });
+		}
 		let cursor: Cell | null = null;
 		for (const placed of dock) {
 			rows.push(...placed.block.rows);
@@ -1131,6 +1152,7 @@ export class TermBackend {
 		this.#fsMaxTop = maxTop;
 		this.#fsBodyHeight = contentHeight;
 		this.#fsDockTop = contentHeight;
+		this.#fsIndicatorAt = indicatorRows > 0 ? contentHeight : -1;
 		this.#fsShown = body;
 		this.#highlightSelection(rows);
 		return { rows, cursor, hits };
@@ -1193,8 +1215,9 @@ export class TermBackend {
 	#transcriptMouse(mouse: MouseEvent): boolean {
 		if (!this.#fsActive) return false;
 		if (mouse.action === "press" && mouse.button === "left") {
-			// The dock under the transcript keeps its own clicks (the composer, buttons).
-			if (mouse.row >= this.#fsDockTop) return false;
+			// The dock under the transcript keeps its own clicks (the composer, buttons); the
+			// indicator row is ours and jumps to the tail on a click.
+			if (mouse.row >= this.#fsDockTop && mouse.row !== this.#fsIndicatorAt) return false;
 			this.#selection = {
 				anchorRow: mouse.row,
 				anchorCol: mouse.col,
@@ -1206,11 +1229,17 @@ export class TermBackend {
 		const selection = this.#selection;
 		if (!selection) return false;
 		if (mouse.action !== "drag" && mouse.action !== "release") return false;
+		// Decided on the raw cells: clamping the drag would hide a press-and-release on one cell.
+		const clicked = mouse.row === selection.anchorRow && mouse.col === selection.anchorCol;
 		selection.row = Math.max(0, Math.min(this.#fsDockTop - 1, mouse.row));
 		selection.col = Math.max(0, Math.min(this.#fsWidth - 1, mouse.col));
 		if (mouse.action === "release") {
-			this.#copySelection();
+			if (!clicked) this.#copySelection();
 			this.#selection = undefined;
+			if (clicked) {
+				if (mouse.row === this.#fsIndicatorAt) this.scrollTranscript("bottom");
+				else this.#routeHit(mouse.row, mouse.col, { ...mouse, action: "press" });
+			}
 		}
 		return true;
 	}
@@ -1322,24 +1351,47 @@ export class TermBackend {
 			return;
 		}
 		this.#trackHover(viewportRow, mouse.col);
+		this.#routeHit(viewportRow, mouse.col, mouse);
+	}
+
+	/** Offer a pointer cell to the last frame's hits, topmost first; true when one took it. */
+	#routeHit(screenRow: number, column: number, mouse: MouseEvent): boolean {
 		for (let i = this.#hits.length - 1; i >= 0; i--) {
-			const { hit, top, left } = this.#hits[i]!;
-			const row = viewportRow - top - hit.row;
-			const col = mouse.col - left - hit.col;
+			const entry = this.#hits[i]!;
+			const { hit, top, left } = entry;
+			const row = screenRow - top - hit.row;
+			const col = column - left - hit.col;
 			if (row < 0 || col < 0 || row >= hit.height || col >= hit.width) continue;
 			const path = pathTo(this.#regions(), hit.node);
 			if (path.length === 0) continue;
 			const widget = widgetFor(hit.node);
-			if (widget?.mouse?.(hit.node, mouse, { row, col }, this.#widgetContext(path), hit)) return;
+			if (widget?.mouse?.(hit.node, mouse, { row, col }, this.#widgetContext(path), hit)) {
+				if (entry.transcript) this.#invalidateTranscript();
+				return true;
+			}
 			if (mouse.action === "press" && mouse.button === "left" && hit.act) {
+				// A transcript action (an expander) may change the block's rows: the window is app-owned,
+				// so the settled cache has to be rebuilt rather than trusted.
+				if (entry.transcript) this.#invalidateTranscript();
 				bubbleEvent(path, { type: "action", key: keypathOf(path), act: hit.act, mods: mouse.mods });
-				return;
+				return true;
 			}
 			if (mouse.action === "press" && mouse.button === "left" && hit.item !== undefined) {
+				if (entry.transcript) this.#invalidateTranscript();
 				bubbleEvent(path, { type: "select", key: keypathOf(path), item: hit.item });
-				return;
+				return true;
 			}
 		}
+		return false;
+	}
+
+	/** Repaint the settled transcript from its nodes on the next frame (a block's rows changed). */
+	#invalidateTranscript(): void {
+		this.#fsRows = [];
+		this.#fsHits = [];
+		this.#fsLast = undefined;
+		this.#fsSettled = 0;
+		this.#fsWidth = 0;
 	}
 
 	/** Point the hover state at the topmost hit under the pointer (painters band it via `cx.hovered`). */
