@@ -263,6 +263,22 @@ function startsWith(rows: readonly string[], emitted: readonly string[], count: 
 	return rows.length >= count || (rows.length === count - 1 && Bun.stripANSI(emitted[count - 1]!).trim() === "");
 }
 
+/**
+ * Move a cell boundary to the edge of the glyph it falls inside: `start` snaps left, `end` snaps
+ * right, so slicing a cell range never drops half of a wide character (it would vanish on screen).
+ */
+function snapColumn(styledRow: string, column: number, edge: "start" | "end"): number {
+	const plain = stripEscapes(styledRow);
+	let cells = 0;
+	for (const char of plain) {
+		const width = visibleWidth(char);
+		if (width > 1 && column > cells && column < cells + width) return edge === "start" ? cells : cells + width;
+		cells += width;
+		if (cells > column) break;
+	}
+	return column;
+}
+
 /** The letters and digits of `row` (borders, bullets, padding and wrapping are not content). */
 function content(row: string): string {
 	return Bun.stripANSI(row).replace(NOT_CONTENT, "");
@@ -409,6 +425,8 @@ export class TermBackend {
 	#sidePanelFraction = 0.42;
 	/** The divider is being dragged. */
 	#panelDragging = false;
+	/** Share the divider was dragged to, applied when the button is released. */
+	#pendingPanelFraction: number | undefined;
 	/** Whether the last composed frame was a fullscreen transcript frame (the mode may change at runtime). */
 	#fsActive = false;
 
@@ -1270,13 +1288,13 @@ export class TermBackend {
 		if (!selection) return;
 		const [first, last] = this.#selectionRange(selection);
 		for (let row = first.row; row <= last.row && row < rows.length && row < this.#fsDockTop; row++) {
-			const from = row === first.row ? first.col : 0;
-			const to = row === last.row ? last.col + 1 : this.#fsWidth;
-			if (to <= from) continue;
 			const text = rows[row]!;
 			// Re-slicing a row that carries graphics or a terminal envelope can change what it draws
 			// (an image or OSC 66 span cut short), which reflows the line under the pointer. Leave it.
 			if (text.includes("\x1b]") || text.includes("\x1bP") || text.includes("\x1b_G")) continue;
+			const from = snapColumn(text, row === first.row ? first.col : 0, "start");
+			const to = snapColumn(text, row === last.row ? last.col + 1 : this.#fsWidth, "end");
+			if (to <= from) continue;
 			rows[row] =
 				`${sliceColumns(text, 0, from)}\x1b[7m${sliceColumns(text, from, to)}\x1b[27m${sliceColumns(text, to, this.#fsWidth)}`;
 		}
@@ -1343,8 +1361,8 @@ export class TermBackend {
 		const lines: string[] = [];
 		for (let row = first.row; row <= last.row && row < this.#fsShown.length; row++) {
 			const text = this.#fsShown[row]!;
-			const from = row === first.row ? first.col : 0;
-			const to = row === last.row ? last.col + 1 : this.#fsWidth;
+			const from = snapColumn(text, row === first.row ? first.col : 0, "start");
+			const to = snapColumn(text, row === last.row ? last.col + 1 : this.#fsWidth, "end");
 			lines.push(stripEscapes(sliceColumns(text, from, to)).replace(/\s+$/, ""));
 		}
 		while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
@@ -1357,11 +1375,17 @@ export class TermBackend {
 		if (!this.#fsActive) return false;
 		// The divider beside the side panel drags: the panel takes the columns right of the pointer.
 		if (this.#panelDragging) {
-			if (mouse.action === "drag" || mouse.action === "release") {
+			if (mouse.action === "drag") {
+				// Relayout once, on release: every step would rebuild the whole settled cache.
 				const columns = this.#driver.columns;
 				const panelColumns = Math.max(10, Math.min(Math.floor(columns * 0.7), columns - mouse.col - 1));
-				this.#sidePanelFraction = panelColumns / columns;
-				if (mouse.action === "release") this.#panelDragging = false;
+				this.#pendingPanelFraction = panelColumns / columns;
+				return true;
+			}
+			if (mouse.action === "release") {
+				if (this.#pendingPanelFraction !== undefined) this.#sidePanelFraction = this.#pendingPanelFraction;
+				this.#pendingPanelFraction = undefined;
+				this.#panelDragging = false;
 				this.#invalidateTranscript();
 				return true;
 			}

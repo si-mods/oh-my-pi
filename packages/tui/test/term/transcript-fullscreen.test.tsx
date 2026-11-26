@@ -475,12 +475,14 @@ describe("fullscreen transcript side panel chrome", () => {
 		term.mouse({ row: 0, col: before, button: "left", action: "press", mods: [] });
 		term.mouse({ row: 0, col: 10, button: "left", action: "drag", mods: [] });
 		term.render();
-		const dragged = dividerColumn();
-		expect(dragged).toBeLessThan(before);
+		// The relayout waits for the release: a step must not rebuild the settled cache.
+		expect(dividerColumn()).toBe(before);
 
 		term.mouse({ row: 0, col: 10, button: "left", action: "release", mods: [] });
 		term.render();
-		expect(dividerColumn()).toBe(dragged);
+		const dragged = dividerColumn();
+		expect(dragged).toBeLessThan(before);
+		term.dispose();
 		term.dispose();
 	});
 });
