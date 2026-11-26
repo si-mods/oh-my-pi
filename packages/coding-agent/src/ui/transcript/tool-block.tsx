@@ -26,6 +26,7 @@ import {
 	type UiEvent,
 	untrack,
 } from "@oh-my-pi/pi-tui";
+import { TOOL_TOGGLE_ACT } from "@oh-my-pi/pi-tui/term/paint";
 import {
 	INTENT_FIELD,
 	isShellTrace,
@@ -836,6 +837,10 @@ export function ToolBlock(props: { readonly call: ToolCall }): JSXNode {
 			intent={prop("intent")}
 			term={prop("term")}
 			onToggle={collapsed => call.toggle(collapsed)}
+			onAction={act => {
+				// A click on a collapsed card's head expands it, like the expand key.
+				if (act === TOOL_TOGGLE_ACT) call.setExpanded(true);
+			}}
 		>
 			{() => body()}
 		</tool>

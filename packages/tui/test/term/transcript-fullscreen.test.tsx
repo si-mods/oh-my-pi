@@ -275,3 +275,36 @@ describe("fullscreen transcript expanders", () => {
 		term.dispose();
 	});
 });
+
+describe("fullscreen transcript card heads", () => {
+	it("bubbles a click on a collapsed card's top border as the expand action", () => {
+		const acts: string[] = [];
+		const tool = (
+			<tool
+				name="bash"
+				title="seq 1 3"
+				status="done"
+				frame="card"
+				collapsible
+				collapsed
+				preview="none"
+				onAction={act => acts.push(act)}
+			>
+				<text text="1" />
+			</tool>
+		) as UiNode;
+		settle(tool);
+		const blocks = signal<UiNode[]>([tool]);
+		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
+			columns: 30,
+			rows: 8,
+			transcriptFullscreen: true,
+		});
+		const border = term.screen().findIndex(line => line.includes("seq 1 3"));
+		expect(border).toBeGreaterThanOrEqual(0);
+		term.mouse({ row: border, col: 2, button: "left", action: "press", mods: [] });
+		term.mouse({ row: border, col: 2, button: "left", action: "release", mods: [] });
+		expect(acts).toEqual(["omp.toggle"]);
+		term.dispose();
+	});
+});

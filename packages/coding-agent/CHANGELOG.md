@@ -16,6 +16,7 @@
 
 ### Added
 
+- A collapsed tool card previews at most 6 output rows (was 20); clicking its head, or the expand key, shows the rest.
 - In the fullscreen transcript, a collapsed tool's head is clickable: a click expands the block (the same as the expand key), and clicking the `↓ N more lines` row jumps back to the tail.
 - Dragging over the fullscreen transcript selects it (the cells invert as the drag covers them) and copies the text on release, through the same clipboard path as the transcript's copy actions; the dock keeps its own clicks, and scrolling drops the selection.
 - Updates and installs from this fork come from its own GitHub Releases: `omp update` reads `v<version>` releases and verifies them against `SHASUMS256.txt`, and `.github/workflows/si-release.yml` builds and publishes the macOS binaries for a tag or on demand. `PI_RELEASE_REPO` and `PI_GITHUB_API` retarget the channel; see [Update channel](../../docs/update-channel.md).
