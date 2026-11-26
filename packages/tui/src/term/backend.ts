@@ -1366,6 +1366,13 @@ export class TermBackend {
 		return true;
 	}
 
+	/** Repaint the settled transcript from its nodes on the next frame (the main list changed under it). */
+	invalidateTranscriptCache(): void {
+		if (!this.#fsActive) return;
+		this.#invalidateTranscript();
+		this.requestRender();
+	}
+
 	/** Where the fullscreen transcript window stands: its top row, the last one, and whether it follows new rows. */
 	transcriptScroll(): { top: number; maxTop: number; bodyHeight: number; following: boolean } | undefined {
 		if (!this.#fsActive) return undefined;

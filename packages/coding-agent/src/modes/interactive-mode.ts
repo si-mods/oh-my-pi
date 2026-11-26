@@ -295,6 +295,7 @@ import {
 	cfgDisplayAdvisorCollapsedLines,
 	cfgDisplayCacheMissMarker,
 	cfgDisplayCollapseCompacted,
+	cfgDisplayFocus,
 	cfgDisplayHideToolActivity,
 	cfgDisplayPinnedAgents,
 	cfgDisplayShellVisualization,
@@ -705,6 +706,14 @@ export class InteractiveMode implements InteractiveModeContext {
 	get toolOutputExpanded(): boolean {
 		return this.#display.toolOutputExpanded();
 	}
+	/** `/focus`: draw only the last turn's prompt, tool summaries and answer. */
+	toggleFocusView(): void {
+		const on = !cfgDisplayFocus.get(this.settings);
+		cfgDisplayFocus.set(this.settings, on);
+		this.shell.transcript.setFocus(on);
+		this.showStatus(on ? "Focus view: last turn" : "Focus view off");
+	}
+
 	set toolOutputExpanded(expanded: boolean) {
 		this.#display.toolOutputExpanded.set(expanded);
 	}
@@ -1847,6 +1856,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	#bindShellHost(): void {
 		// The prepaint path starts the shell before this, so the live settings apply here too.
 		this.#syncFrameSettings();
+		this.shell.transcript.setFocus(cfgDisplayFocus.get(this.settings));
+		this.#eventBusUnsubscribers.push(cfgDisplayFocus.listen(this.settings, on => this.shell.transcript.setFocus(on)));
 		// The fullscreen transcript scrolls in-app: these keys never reach the composer, and nothing
 		// under an overlay (a picker pages its own list) is intercepted. The host reports false when
 		// the mode is off, so the keys pass through.

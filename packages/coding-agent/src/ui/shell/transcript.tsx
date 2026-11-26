@@ -84,6 +84,8 @@ export interface TranscriptHost {
 	replayHistory(): void;
 	/** Describe again the settled block holding `node` (Tern dropped its description). */
 	redescribe(node: UiNode): void;
+	/** The main list changed wholesale (a view filter): repaint the fullscreen transcript. */
+	invalidateTranscriptCache?(): void;
 }
 
 const NOT_COMPACT: Accessor<boolean> = () => false;
@@ -143,8 +145,24 @@ export class Transcript {
 	/** Blocks in order (reactive); while {@link stage}d, the staged ones. */
 	readonly blocks: Accessor<readonly TranscriptBlock[]> = () => this.#target().entries();
 
-	/** The blocks' nodes, as the terminal draws them (reactive). */
-	readonly nodes: Accessor<readonly UiNode[]> = this.#shown.nodes;
+	/** `/focus`: draw only the last turn (from its prompt onward). */
+	readonly #focus = signal(false);
+
+	/** The blocks' nodes, as the terminal draws them (reactive); `/focus` hides earlier turns. */
+	readonly nodes: Accessor<readonly UiNode[]> = () => {
+		const entries = this.#shown.entries();
+		if (!this.#focus()) return entries.map(entry => entry.node);
+		const at = lastUserBlock(entries.map(entry => entry.node));
+		return (at > 0 ? entries.slice(at) : entries).map(entry => entry.node);
+	};
+
+	/** Turn `/focus` on or off; the terminal history is replayed for what it hid or showed. */
+	setFocus(on: boolean): void {
+		if (this.#focus.peek() === on) return;
+		this.#focus.set(on);
+		this.#host?.invalidateTranscriptCache?.();
+		this.#host?.replayHistory();
+	}
 
 	get #blocks(): ViewList<TranscriptBlock> {
 		return this.#target.peek();
@@ -411,6 +429,20 @@ export class Transcript {
 		this.#byNode.set(entry.node, block);
 		return block;
 	}
+}
+
+/** Whether a block is a user prompt: its `omp.block` wrapper holds an `omp.user` card. */
+export function isUserBlock(node: UiNode): boolean {
+	return node.children().some(child => {
+		if (child.kind !== "card") return false;
+		return String((child.props() as { role?: string }).role ?? "").startsWith("omp.user");
+	});
+}
+
+/** Index of the last user prompt among `nodes`, or -1. */
+export function lastUserBlock(nodes: readonly UiNode[]): number {
+	for (let i = nodes.length - 1; i >= 0; i--) if (isUserBlock(nodes[i]!)) return i;
+	return -1;
 }
 
 /** Mark `block` final: its node, and the nodes Tern receives for it. */
