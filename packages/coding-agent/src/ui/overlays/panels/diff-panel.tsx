@@ -84,12 +84,12 @@ export class DiffModel {
 		return this.#rows;
 	}
 
-	/** The panel: the title, the visible window, and the key hints. */
+	/** The panel: the title, the visible window, and the key hints (all reactive to a refresh). */
 	view(): JSXNode {
 		return (
 			<col>
-				<text spans={[{ s: "accent", t: this.title() }]} />
-				<rows lines={this.lines().slice(this.scroll(), this.scroll() + this.#rows)} />
+				<text spans={() => [{ s: "accent", t: this.title() }]} />
+				<rows lines={() => this.lines().slice(this.scroll(), this.scroll() + this.#rows)} />
 				<text spans={[{ s: "dim", t: "j/k scroll · r refresh · esc close" }]} />
 			</col>
 		);
