@@ -140,6 +140,12 @@ export interface Host {
 	transcriptScroll():
 		| { readonly top: number; readonly maxTop: number; readonly bodyHeight: number; readonly following: boolean }
 		| undefined;
+	/** Search the fullscreen transcript (case-insensitive, per row); an empty query clears it. */
+	searchTranscript(query: string): { readonly index: number; readonly count: number } | undefined;
+	/** Move the current search match by `delta`, wrapping. */
+	nextSearchMatch(delta: number): { readonly index: number; readonly count: number } | undefined;
+	/** The active search, if any. */
+	searchState(): { readonly query: string; readonly index: number; readonly count: number } | undefined;
 	/** Whether the terminal advertises TSP feature `name` (reactive; always false in the terminal renderer). */
 	feature(name: string): boolean;
 	/**
@@ -242,6 +248,9 @@ type Renderer = Pick<
 	| "suspend"
 	| "scrollTranscript"
 	| "transcriptScroll"
+	| "searchTranscript"
+	| "nextSearchMatch"
+	| "searchState"
 > & {
 	/** Stop rendering and release the renderer (not the driver). */
 	stop(): void;
@@ -372,6 +381,9 @@ export async function startHost(options: HostOptions): Promise<Host> {
 			dispatch: event => backend.dispatch(event),
 			scrollTranscript: () => false,
 			transcriptScroll: () => undefined,
+			searchTranscript: () => undefined,
+			nextSearchMatch: () => undefined,
+			searchState: () => undefined,
 			feature: name => connection.hasFeature(name),
 			checkoutShown: () => connection.checkout(),
 			setMouse: tracking => driver.setMouse(tracking),
@@ -433,6 +445,9 @@ export async function startHost(options: HostOptions): Promise<Host> {
 			dispatch: event => backend.dispatch(event),
 			scrollTranscript: by => backend.scrollTranscript(by),
 			transcriptScroll: () => backend.transcriptScroll(),
+			searchTranscript: query => backend.searchTranscript(query),
+			nextSearchMatch: delta => backend.nextSearchMatch(delta),
+			searchState: () => backend.searchState(),
 			feature: () => false,
 			checkoutShown: () => false,
 			setMouse(tracking) {
@@ -479,6 +494,9 @@ export async function startHost(options: HostOptions): Promise<Host> {
 		dispatch: event => renderer.dispatch(event),
 		scrollTranscript: by => renderer.scrollTranscript(by),
 		transcriptScroll: () => renderer.transcriptScroll(),
+		searchTranscript: query => renderer.searchTranscript(query),
+		nextSearchMatch: delta => renderer.nextSearchMatch(delta),
+		searchState: () => renderer.searchState(),
 		feature: name => renderer.feature(name),
 		checkoutShown: () => renderer.checkoutShown(),
 		suspend: run => renderer.suspend(run),
