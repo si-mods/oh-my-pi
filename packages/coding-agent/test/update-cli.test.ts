@@ -11,6 +11,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/cli/build-service";
 import * as pluginCli from "@oh-my-pi/pi-coding-agent/cli/plugin-cli";
 import * as updateCli from "@oh-my-pi/pi-coding-agent/cli/update-cli";
+import { runningInstallPath } from "@oh-my-pi/pi-coding-agent/cli/update-cli";
 import {
 	type BinaryPatchApplier,
 	buildBunInstallArgs,
@@ -544,6 +545,35 @@ describe("update-cli install target detection", () => {
 		});
 
 		expect(method).toBe("mise");
+	});
+});
+
+describe("runningInstallPath", () => {
+	/** Run `fn` with `process.execPath` reading `value`. */
+	async function withExecPath<T>(value: string, fn: () => Promise<T> | T): Promise<T> {
+		const descriptor = Object.getOwnPropertyDescriptor(process, "execPath");
+		if (!descriptor) throw new Error("process.execPath descriptor missing");
+		Object.defineProperty(process, "execPath", { ...descriptor, value });
+		try {
+			return await fn();
+		} finally {
+			Object.defineProperty(process, "execPath", descriptor);
+		}
+	}
+
+	it("returns a renamed copy of the binary, so ompdev updates itself", async () => {
+		const dir = await makeTempDir();
+		const binary = path.join(dir, "ompdev");
+		await Bun.write(binary, "#!/bin/sh\nexit 0\n");
+		expect(await withExecPath(binary, () => runningInstallPath())).toBe(binary);
+	});
+
+	it("ignores the plain omp name and a runtime that is not the binary", async () => {
+		const dir = await makeTempDir();
+		const plain = path.join(dir, "omp");
+		await Bun.write(plain, "#!/bin/sh\nexit 0\n");
+		expect(await withExecPath(plain, () => runningInstallPath())).toBeUndefined();
+		expect(await withExecPath("/usr/local/bin/bun", () => runningInstallPath())).toBeUndefined();
 	});
 });
 

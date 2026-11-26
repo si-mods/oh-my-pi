@@ -999,8 +999,23 @@ async function pruneBunCacheAfterGlobalInstall(): Promise<BunInstallCachePruneRe
 /**
  * Resolve the path that `omp` maps to in the user's PATH.
  */
+/**
+ * The running install when it is a renamed copy of the binary (`ompdev`,
+ * `omp-canary`): a runner asked `ompdev update` must replace itself, not
+ * whichever `omp` comes first on PATH.
+ */
+export function runningInstallPath(): string | undefined {
+	const base = path.basename(process.execPath);
+	if (base === APP_NAME || !base.startsWith(APP_NAME)) return undefined;
+	try {
+		return fs.statSync(process.execPath).isFile() ? process.execPath : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 function resolveOmpPath(): string | undefined {
-	return $which(APP_NAME) ?? undefined;
+	return runningInstallPath() ?? $which(APP_NAME) ?? undefined;
 }
 
 /**
