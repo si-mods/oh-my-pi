@@ -405,6 +405,10 @@ export class TermBackend {
 	 * nothing from the terminal; the transcript is laid out at the remaining width.
 	 */
 	#sidePanel: SidePanelSource | undefined;
+	/** Share of the width the side column takes; the divider drag updates it. */
+	#sidePanelFraction = 0.42;
+	/** The divider is being dragged. */
+	#panelDragging = false;
 	/** Whether the last composed frame was a fullscreen transcript frame (the mode may change at runtime). */
 	#fsActive = false;
 
@@ -768,13 +772,7 @@ export class TermBackend {
 		if (transcriptOn && !flush) {
 			const panel = flush ? undefined : this.#sidePanel;
 			const panelWidth = panel
-				? Math.max(
-						20,
-						Math.min(
-							Math.floor(width * 0.7),
-							Math.round(width * Math.min(0.7, Math.max(0.25, panel.fraction ?? 0.42))),
-						),
-					)
+				? Math.max(20, Math.min(Math.floor(width * 0.7), Math.round(width * this.#sidePanelFraction)))
 				: 0;
 			const bodyWidth = panel ? Math.max(10, width - panelWidth - 1) : width;
 			this.#fsBodyWidth = bodyWidth;
@@ -1305,6 +1303,38 @@ export class TermBackend {
 				];
 	}
 
+	/** Select the word under `(row, col)` and copy it (a click without a drag). */
+	#copyWordAt(row: number, col: number): void {
+		const plain = stripEscapes(this.#fsShown[row] ?? "");
+		if (plain === "") return;
+		// Map the cell column to a string index: wide glyphs take two cells.
+		const word = /[\p{L}\p{N}_]/u;
+		let index = -1;
+		let cells = 0;
+		for (const [at, char] of [...plain].entries()) {
+			const width = visibleWidth(char);
+			// Either half of a wide glyph points at the glyph.
+			if (col >= cells && col < cells + width) {
+				index = at;
+				break;
+			}
+			cells += width;
+		}
+		if (index < 0) return;
+		const chars = [...plain];
+		const target = chars[index]!;
+		if (!word.test(target)) return;
+		let start = index;
+		let end = index;
+		while (start > 0 && word.test(chars[start - 1]!)) start--;
+		while (end + 1 < chars.length && word.test(chars[end + 1]!)) end++;
+		const startCol = visibleWidth(chars.slice(0, start).join(""));
+		const endCol = startCol + visibleWidth(chars.slice(start, end + 1).join("")) - 1;
+		this.#selection = { anchorRow: row, anchorCol: startCol, row, col: endCol };
+		this.#copySelection();
+		this.#selection = undefined;
+	}
+
 	/** Copy the selected transcript cells (trailing blanks trimmed, escapes stripped) to the app. */
 	#copySelection(): void {
 		const selection = this.#selection;
@@ -1325,6 +1355,22 @@ export class TermBackend {
 	/** A left-drag over the transcript selects; a release copies and clears. False: route the event. */
 	#transcriptMouse(mouse: MouseEvent): boolean {
 		if (!this.#fsActive) return false;
+		// The divider beside the side panel drags: the panel takes the columns right of the pointer.
+		if (this.#panelDragging) {
+			if (mouse.action === "drag" || mouse.action === "release") {
+				const columns = this.#driver.columns;
+				const panelColumns = Math.max(10, Math.min(Math.floor(columns * 0.7), columns - mouse.col - 1));
+				this.#sidePanelFraction = panelColumns / columns;
+				if (mouse.action === "release") this.#panelDragging = false;
+				this.#invalidateTranscript();
+				return true;
+			}
+			return false;
+		}
+		if (this.#sidePanel && mouse.col === this.#fsBodyWidth && (mouse.action === "press" || mouse.action === "drag")) {
+			if (mouse.action === "press" && mouse.button === "left") this.#panelDragging = true;
+			return true;
+		}
 		if (mouse.action === "press" && mouse.button === "left") {
 			// The dock under the transcript keeps its own clicks (the composer, buttons); the
 			// indicator row is ours and jumps to the tail on a click; the side panel's columns
@@ -1350,11 +1396,18 @@ export class TermBackend {
 		selection.row = Math.max(0, Math.min(this.#fsDockTop - 1, mouse.row));
 		selection.col = Math.max(0, Math.min(this.#fsWidth - 1, mouse.col));
 		if (mouse.action === "release") {
-			if (!clicked) this.#copySelection();
-			this.#selection = undefined;
-			if (clicked) {
-				if (mouse.row === this.#fsIndicatorAt) this.scrollTranscript("bottom");
-				else this.#routeHit(mouse.row, mouse.col, { ...mouse, action: "press" });
+			if (!clicked) {
+				this.#copySelection();
+				this.#selection = undefined;
+			} else {
+				this.#selection = undefined;
+				const routed =
+					mouse.row === this.#fsIndicatorAt
+						? (this.scrollTranscript("bottom"), true)
+						: this.#routeHit(mouse.row, mouse.col, { ...mouse, action: "press" });
+				// A click on plain transcript text selects and copies the word under the pointer; a
+				// click on an expander, a button or a link keeps its own action.
+				if (!routed) this.#copyWordAt(mouse.row, mouse.col);
 			}
 		}
 		return true;
@@ -1404,6 +1457,8 @@ export class TermBackend {
 	/** Open or close the side column; the transcript's layout width changes with it. */
 	setSidePanel(panel: SidePanelSource | undefined): void {
 		this.#sidePanel = panel;
+		if (panel) this.#sidePanelFraction = Math.min(0.7, Math.max(0.25, panel.fraction ?? 0.42));
+		this.#panelDragging = false;
 		this.#invalidateTranscript();
 		this.requestRender();
 	}
@@ -1422,7 +1477,11 @@ export class TermBackend {
 		for (let row = 0; row < height; row++) {
 			const left = rows[row] ?? "";
 			const right = lines[scroll + row] ?? "";
-			out.push(`${padTo(truncate(left, bodyWidth, ""), bodyWidth)}\u2502${truncate(right, panelWidth, "")}`);
+			// A transcript row may end with an SGR still open (a coloured span): close it before the
+			// divider, or the panel's own text takes the colour of whatever row happens to be beside it.
+			const leftRow = padTo(truncate(left, bodyWidth, ""), bodyWidth);
+			const rightRow = padTo(truncate(right, panelWidth, ""), panelWidth);
+			out.push(`${leftRow}\x1b[0m\x1b[2m\u2502\x1b[22m${rightRow}\x1b[0m`);
 		}
 		return out;
 	}
