@@ -55,6 +55,7 @@ import { mountNode } from "../../ui/shell";
 import { type ExecRun, ExecRunBlock } from "../../ui/transcript/exec-run";
 import { cardExpansion } from "../../ui/transcript/expansion";
 import { PresentedBlock } from "../../ui/transcript/figures/presented-block";
+import { focusToolSummary } from "../../ui/transcript/focus-summary";
 import { SpotlightNotice } from "../../ui/transcript/figures/spotlight";
 import {
 	AssistantMessageBlock,
@@ -93,6 +94,8 @@ export interface DisplayFlags {
 	readonly mcpMarkdown: Signal<boolean>;
 	/** `read.toolResultPreview`. */
 	readonly readPreview: Signal<boolean>;
+	/** `/focus`: tool cards draw as one-line summaries (until Ctrl+O) and earlier turns are hidden. */
+	readonly focus: Signal<boolean>;
 }
 
 /** What the presenter needs from the interactive mode. */
@@ -461,8 +464,14 @@ export class TranscriptPresenter {
 				});
 			});
 			effect(() => {
-				const presentation = toolPresentation(answer());
-				untrack(() => call.setPresentation(presentation));
+				const answered = toolPresentation(answer());
+				if (!display.focus() || display.toolOutputExpanded()) {
+					untrack(() => call.setPresentation(answered));
+					return;
+				}
+				// `/focus`: the call's one line — what it touched, plus a diffstat for edits.
+				const summary = focusToolSummary(call.name, call.facts.args());
+				untrack(() => call.setPresentation(summary ? { compact: { label: summary, rows: [] } } : answered));
 			});
 			this.#watchPresentation(() => block, answer);
 			// The Spotlight notice of a shaped result rides after its card (native only: the terminal draws nothing).
