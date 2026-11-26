@@ -37,9 +37,12 @@ no delta patch on this channel; every update downloads the whole file.
 
 ## Publishing this fork
 
-`.github/workflows/si-release.yml` builds `darwin-arm64` and `darwin-x64` on a
-macOS runner and publishes them, with `SHASUMS256.txt`, to a release on this
-repository:
+`.github/workflows/si-release.yml` builds `darwin-arm64` and `darwin-x64` on the
+self-hosted `instabox-medium` runner and publishes them, with `SHASUMS256.txt`,
+to a release on this repository. The binaries are cross-compiled on Linux, so
+the workflow runs `scripts/ci-macos-sign.sh` afterwards to replace Bun's own
+Mach-O signature (a Developer ID when the `APPLE_*` secrets exist, ad hoc
+otherwise):
 
 ```sh
 gh workflow run si-release.yml                 # version from package.json

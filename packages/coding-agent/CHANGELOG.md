@@ -22,6 +22,7 @@
 
 ### Changed
 
+- Release binaries build on the self-hosted `instabox-medium` runner instead of a GitHub macOS runner: both targets are cross-compiled on Linux and ad-hoc signed with `scripts/ci-macos-sign.sh` (no CI secrets needed), so a fork never waits in the macOS queue.
 - Fork versions carry a `-si.N` suffix (`19.2.1-si.1`, set in `packages/utils/package.json`, which is the version the binary reports) so a release here never collides with an upstream version number.
 - `PI_SESSION_ID` and `PI_SESSION_FILE` now reach every command omp runs for a session (eval `sh()`, `!` commands, `/loop` conditions, autoresearch runs), not only `bash` tool calls, so `ovnfs ls` can show the session that opened each checkout.
 - The ovnfs checkouts of isolated subagents record the session that spawned them, and `/wt` checkouts the session moving into them; `ovnfs ls` shows it as SESSION once its daemon is restarted onto a build that supports it.
