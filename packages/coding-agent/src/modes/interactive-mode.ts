@@ -729,6 +729,8 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	set toolOutputExpanded(expanded: boolean) {
 		this.#display.toolOutputExpanded.set(expanded);
+		// The fullscreen transcript caches settled rows; their presentation just changed under it.
+		this.shell.host?.invalidateTranscriptCache();
 	}
 	get hideToolActivity(): boolean {
 		return this.#display.hideToolActivity();
