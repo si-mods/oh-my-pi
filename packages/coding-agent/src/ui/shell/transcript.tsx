@@ -462,7 +462,11 @@ function paintBlock(node: UiNode, cx: PaintContext): Block {
 		rows: rows.slice(start, end),
 		...(painted.cursor ? { cursor: { row: painted.cursor.row - start, col: painted.cursor.col + shift } } : {}),
 		...(painted.hits
-			? { hits: painted.hits.map(hit => ({ ...hit, row: hit.row - start, col: hit.col + shift })) }
+			? {
+					hits: painted.hits
+						.map(hit => ({ ...hit, row: hit.row - start, col: hit.col + shift }))
+						.filter(hit => hit.row >= 0 && hit.row < end - start),
+				}
 			: {}),
 		...(painted.stable !== undefined ? { stable: Math.max(0, painted.stable - start) } : {}),
 	};

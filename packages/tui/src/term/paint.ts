@@ -155,12 +155,14 @@ export const TOOL_TOGGLE_ACT = "omp.toggle";
 /** Give a collapsible tool's first row the expand action, whichever style painter drew it. */
 function withToolToggle(node: UiNode, block: Block): Block {
 	if (node.kind !== "tool" || (node.props() as { collapsible?: boolean }).collapsible !== true) return block;
-	if (block.rows.length === 0) return block;
-	const width = visibleWidth(block.rows[0]!);
-	if (width === 0) return block;
+	// The first row with content is the head; a painter may pad above it, and a `paintBlock` above
+	// that trims leading blanks, which would leave a row-0 hit outside the visible block.
+	const row = block.rows.findIndex(line => visibleWidth(line) > 0);
+	if (row < 0) return block;
+	const width = visibleWidth(block.rows[row]!);
 	return {
 		...block,
-		hits: [...(block.hits ?? []), { row: 0, col: 0, width, height: 1, node, act: TOOL_TOGGLE_ACT }],
+		hits: [...(block.hits ?? []), { row, col: 0, width, height: 1, node, act: TOOL_TOGGLE_ACT }],
 	};
 }
 
