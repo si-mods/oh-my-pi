@@ -435,6 +435,7 @@ import type { ExecRun } from "../ui/transcript/exec-run";
 import { applyFileLinkSetting } from "../utils/file-links";
 import { openPath } from "../utils/open";
 import { AppFrame } from "./interactive/frame";
+import { firstInput, TranscriptSearch, type TranscriptSearchModel } from "../ui/overlays/panels/transcript-search";
 import { SessionStatusLine } from "./interactive/status-line";
 import type { MessageFaceEnv } from "./interactive/messages";
 import { type DisplayFlags, TranscriptPresenter } from "./interactive/transcript";
@@ -1759,6 +1760,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			return lines !== 0 && host.scrollTranscript(lines);
 		}
 		if (event.type !== "key" || event.key.kind !== "press") return false;
+		if (event.key.id === "ctrl+r") {
+			this.#openTranscriptSearch();
+			return true;
+		}
 		const page = Math.max(1, Math.floor(view.bodyHeight / 2));
 		switch (event.key.id) {
 			case "pageUp":
@@ -1772,6 +1777,41 @@ export class InteractiveMode implements InteractiveModeContext {
 			default:
 				return false;
 		}
+	}
+
+	/**
+	 * Ctrl+R: a one-line search over the fullscreen transcript. Typing moves the highlight, Enter
+	 * steps to the next match (wrapping), Esc closes and clears it.
+	 */
+	#openTranscriptSearch(): void {
+		const host = this.shell.host;
+		if (!host?.searchTranscript || this.shell.overlays.open()) return;
+		const query = signal("");
+		const caret = signal(0);
+		const status = signal<{ index: number; count: number }>({ index: 0, count: 0 });
+		const model: TranscriptSearchModel = {
+			query,
+			caret,
+			status,
+			onEdit: edit => {
+				const next = query().slice(0, edit.from) + edit.text + query().slice(edit.to);
+				query.set(next);
+				caret.set(edit.cursor);
+				status.set(host.searchTranscript(next) ?? status());
+			},
+			onKey: key => {
+				if (key.kind === "release") return false;
+				if (key.id === "enter") {
+					status.set(host.nextSearchMatch(1) ?? status());
+					return true;
+				}
+				return false;
+			},
+		};
+		this.shell.overlays.show(() => TranscriptSearch(model), {
+			focus: root => firstInput(root) ?? root,
+			onClose: () => host.searchTranscript(""),
+		});
 	}
 
 	/** The terminal renderer's presented frames, for `/record` and the live stream (none natively). */

@@ -18,6 +18,7 @@
 
 ### Added
 
+- In-app transcript search: `Ctrl+R` in the fullscreen transcript opens a one-line search over settled and live rows, highlights every match in place, shows `index/count`, steps through matches with `Enter` (wrapping), and pauses following while it is open.
 - A collapsed tool card previews at most 6 output rows (was 20); clicking its head, or the expand key, shows the rest. Every collapsible tool head carries the click target, whichever style painter drew it (inline rows, cards, `!`/`$` runs).
 - In the fullscreen transcript, a collapsed tool's head is clickable: a click expands the block (the same as the expand key), and clicking the `↓ N more lines` row jumps back to the tail.
 - Dragging over the fullscreen transcript selects it (the cells invert as the drag covers them) and copies the text on release, through the same clipboard path as the transcript's copy actions; the dock keeps its own clicks, and scrolling drops the selection.

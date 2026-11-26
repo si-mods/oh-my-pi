@@ -383,6 +383,10 @@ export class TermBackend {
 	#fsHits: { hit: Hit; row: number }[] = [];
 	/** Screen row of the "jump to bottom" indicator this frame, or -1 (a click there follows the tail). */
 	#fsIndicatorAt = -1;
+	/** The live tail's rows as the last frame laid them out (what a search reads past the settled cache). */
+	#fsLiveRows: string[] = [];
+	/** The active transcript search: the lowercased query, matching absolute rows, and the current one. */
+	#search: { query: string; rows: number[]; index: number } | undefined;
 	/** Whether the last composed frame was a fullscreen transcript frame (the mode may change at runtime). */
 	#fsActive = false;
 
@@ -1154,8 +1158,79 @@ export class TermBackend {
 		this.#fsDockTop = contentHeight;
 		this.#fsIndicatorAt = indicatorRows > 0 ? contentHeight : -1;
 		this.#fsShown = body;
+		this.#fsLiveRows = live;
+		this.#highlightSearch(rows, top, padding);
 		this.#highlightSelection(rows);
 		return { rows, cursor, hits };
+	}
+
+	/** Invert every occurrence of the search query in the window (rows are the frame's, content first). */
+	#highlightSearch(rows: string[], top: number, padding: number): void {
+		const search = this.#search;
+		if (!search) return;
+		const matching = new Set(search.rows);
+		for (let screen = 0; screen < rows.length && screen < this.#fsDockTop; screen++) {
+			const absolute = top + screen - padding;
+			if (!matching.has(absolute)) continue;
+			const text = rows[screen]!;
+			if (text.includes("\x1b]") || text.includes("\x1bP") || text.includes("\x1b_G")) continue;
+			const plain = stripEscapes(text).toLowerCase();
+			const at = plain.indexOf(search.query);
+			if (at < 0) continue;
+			const end = at + search.query.length;
+			rows[screen] =
+				`${sliceColumns(text, 0, at)}\x1b[7m${sliceColumns(text, at, end)}\x1b[27m${sliceColumns(text, end, this.#fsWidth)}`;
+		}
+	}
+
+	/**
+	 * Search the fullscreen transcript (settled rows plus the live tail), lowercased and per row.
+	 * An empty query clears the search. The first match is revealed, following paused.
+	 */
+	searchTranscript(query: string): { index: number; count: number } | undefined {
+		if (!this.#fsActive) return undefined;
+		const needle = query.trim().toLowerCase();
+		if (needle === "") {
+			this.#search = undefined;
+			this.requestRender();
+			return { index: 0, count: 0 };
+		}
+		const rows = [...this.#fsRows, ...this.#fsLiveRows];
+		const matches: number[] = [];
+		for (let row = 0; row < rows.length; row++) {
+			if (stripEscapes(rows[row]!).toLowerCase().includes(needle)) matches.push(row);
+		}
+		this.#search = { query: needle, rows: matches, index: 0 };
+		this.#revealSearchMatch();
+		this.requestRender();
+		return { index: matches.length > 0 ? 1 : 0, count: matches.length };
+	}
+
+	/** Move the current search match by `delta` (wrapping) and reveal it. */
+	nextSearchMatch(delta: number): { index: number; count: number } | undefined {
+		const search = this.#search;
+		if (!search || search.rows.length === 0) return undefined;
+		const count = search.rows.length;
+		search.index = (((search.index + delta) % count) + count) % count;
+		this.#revealSearchMatch();
+		this.requestRender();
+		return { index: search.index + 1, count };
+	}
+
+	/** Where the active search stands: its query, the current match (1-based) and the total. */
+	searchState(): { query: string; index: number; count: number } | undefined {
+		const search = this.#search;
+		if (!search) return undefined;
+		return { query: search.query, index: search.rows.length > 0 ? search.index + 1 : 0, count: search.rows.length };
+	}
+
+	/** Scroll so the current match is visible; the window stays put afterwards (following off). */
+	#revealSearchMatch(): void {
+		const search = this.#search;
+		const row = search?.rows[search.index];
+		if (row === undefined) return;
+		this.#fsFollow = false;
+		this.#fsTop = Math.max(0, Math.min(this.#fsMaxTop, row - Math.floor(this.#fsBodyHeight / 2)));
 	}
 
 	/** Invert the selected cells of the transcript window (rows are the frame's, content first). */
@@ -1265,6 +1340,7 @@ export class TermBackend {
 		this.#fsMaxTop = 0;
 		this.#fsFollow = true;
 		this.#selection = undefined;
+		this.#search = undefined;
 		if (on) return;
 		this.#replay = true;
 		this.#emitted.clear();

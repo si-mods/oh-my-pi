@@ -357,3 +357,58 @@ describe("fullscreen transcript selection stability", () => {
 		term.dispose();
 	});
 });
+
+describe("fullscreen transcript search", () => {
+	function searching(lines: string[], live?: string) {
+		const settled = lines.map(line => (<text text={line} />) as UiNode);
+		for (const node of settled) settle(node);
+		const pending = live === undefined ? undefined : ((<text text={live} />) as UiNode);
+		const blocks = signal<UiNode[]>(pending ? [...settled, pending] : settled);
+		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
+			columns: 20,
+			rows: 6,
+			transcriptFullscreen: true,
+		});
+		return { term, blocks, pending };
+	}
+
+	it("finds a row, highlights it, and pauses following", () => {
+		const { term } = searching(["a", "b", "c", "d", "e", "f", "g", "h"]);
+
+		expect(term.backend.searchTranscript("g")).toEqual({ index: 1, count: 1 });
+		term.render();
+		expect(term.rows().some(row => row.includes("\x1b[7m"))).toBe(true);
+		expect(term.backend.transcriptScroll()?.following).toBe(false);
+		expect(term.backend.searchState()).toEqual({ query: "g", index: 1, count: 1 });
+		term.dispose();
+	});
+
+	it("counts every match and moves between them with wrapping", () => {
+		const { term } = searching(["x one", "middle", "x two"]);
+
+		expect(term.backend.searchTranscript("x ")).toEqual({ index: 1, count: 2 });
+		expect(term.backend.nextSearchMatch(1)).toEqual({ index: 2, count: 2 });
+		expect(term.backend.nextSearchMatch(1)).toEqual({ index: 1, count: 2 });
+		expect(term.backend.nextSearchMatch(-1)).toEqual({ index: 2, count: 2 });
+		term.dispose();
+	});
+
+	it("searches the live tail, not only settled rows", () => {
+		const { term } = searching(["a", "b"], "live needle");
+
+		expect(term.backend.searchTranscript("needle")).toEqual({ index: 1, count: 1 });
+		term.dispose();
+	});
+
+	it("clears the highlight on an empty query", () => {
+		const { term } = searching(["a", "b", "c"]);
+
+		term.backend.searchTranscript("b");
+		term.render();
+		expect(term.rows().some(row => row.includes("\x1b[7m"))).toBe(true);
+		expect(term.backend.searchTranscript("")).toEqual({ index: 0, count: 0 });
+		term.render();
+		expect(term.rows().some(row => row.includes("\x1b[7m"))).toBe(false);
+		term.dispose();
+	});
+});
