@@ -614,6 +614,8 @@ export interface InteractiveModeContext {
 	toolOutputExpanded: boolean;
 	/** Toggle the last-turn-only transcript view (`/focus`). */
 	toggleFocusView(): void;
+	/** Open the working tree's diff panel (`/diff`). */
+	showDiffPanel(): void;
 	/** Tool activity hidden (reactive, see {@link toolOutputExpanded}). */
 	hideToolActivity: boolean;
 	todoExpanded: boolean;

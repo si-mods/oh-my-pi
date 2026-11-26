@@ -437,6 +437,7 @@ import { applyFileLinkSetting } from "../utils/file-links";
 import { openPath } from "../utils/open";
 import { AppFrame } from "./interactive/frame";
 import { firstInput, TranscriptSearch, type TranscriptSearchModel } from "../ui/overlays/panels/transcript-search";
+import { DiffModel, DiffPanel } from "../ui/overlays/panels/diff-panel";
 import { SessionStatusLine } from "./interactive/status-line";
 import type { MessageFaceEnv } from "./interactive/messages";
 import { type DisplayFlags, TranscriptPresenter } from "./interactive/transcript";
@@ -706,6 +707,16 @@ export class InteractiveMode implements InteractiveModeContext {
 	get toolOutputExpanded(): boolean {
 		return this.#display.toolOutputExpanded();
 	}
+	/** `/diff`: the working tree's changes in a panel under the conversation. */
+	showDiffPanel(): void {
+		if (this.shell.overlays.open()) return;
+		const model = new DiffModel(getProjectDir(), this.shell.size().rows);
+		const handle = this.shell.overlays.show(() => DiffPanel({ model, onClose: () => handle.close() }), {
+			focus: root => root,
+		});
+		void model.refresh();
+	}
+
 	/** `/focus`: draw only the last turn's prompt, tool summaries and answer. */
 	toggleFocusView(): void {
 		const on = !cfgDisplayFocus.get(this.settings);
