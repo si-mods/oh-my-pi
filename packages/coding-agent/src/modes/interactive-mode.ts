@@ -708,14 +708,42 @@ export class InteractiveMode implements InteractiveModeContext {
 	get toolOutputExpanded(): boolean {
 		return this.#display.toolOutputExpanded();
 	}
-	/** `/diff`: the working tree's changes in a panel under the conversation. */
+	/** The side panel `/diff` draws in the fullscreen transcript, while it is open. */
+	#diffPanel: DiffModel | undefined;
+
+	/**
+	 * `/diff`: the working tree's changes. In the fullscreen transcript they take a right-hand column
+	 * beside the conversation; the inline transcript has no split, so there they open as a sheet.
+	 */
 	showDiffPanel(): void {
-		if (this.shell.overlays.open()) return;
+		if (this.#diffPanel) {
+			this.#closeDiffPanel();
+			return;
+		}
+		const host = this.shell.host;
+		const fullscreen = cfgTuiTranscriptMode.get(this.settings) === "fullscreen";
+		if (!fullscreen || !host) {
+			if (this.shell.overlays.open()) return;
+			const model = new DiffModel(getProjectDir(), this.shell.size().rows);
+			const handle = this.shell.overlays.show(() => DiffPanel({ model, onClose: () => handle.close() }), {
+				focus: root => root,
+			});
+			void model.refresh();
+			return;
+		}
 		const model = new DiffModel(getProjectDir(), this.shell.size().rows);
-		const handle = this.shell.overlays.show(() => DiffPanel({ model, onClose: () => handle.close() }), {
-			focus: root => root,
+		this.#diffPanel = model;
+		host.setSidePanel({
+			lines: () => [model.title(), ...model.lines()],
+			scroll: () => model.scroll(),
 		});
 		void model.refresh();
+	}
+
+	/** Close the `/diff` column and give the transcript its full width back. */
+	#closeDiffPanel(): void {
+		this.#diffPanel = undefined;
+		this.shell.host?.setSidePanel(undefined);
 	}
 
 	/** `/focus`: draw only the last turn's prompt, tool summaries and answer. */
@@ -1784,6 +1812,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			return lines !== 0 && host.scrollTranscript(lines);
 		}
 		if (event.type !== "key" || event.key.kind !== "press") return false;
+		if (this.#diffPanel) {
+			void this.#diffPanel.key(event.key, () => this.#closeDiffPanel());
+			return true;
+		}
 		if (event.key.id === "ctrl+r") {
 			this.#openTranscriptSearch();
 			return true;

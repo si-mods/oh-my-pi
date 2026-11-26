@@ -412,3 +412,24 @@ describe("fullscreen transcript search", () => {
 		term.dispose();
 	});
 });
+
+describe("fullscreen transcript side panel", () => {
+	it("draws the panel right of a divider and gives the width back on close", () => {
+		const { term } = transcript(["alpha", "beta", "gamma"]);
+
+		term.backend.setSidePanel({ lines: () => ["PANEL", "row2"], scroll: () => 0 });
+		term.render();
+		const withPanel = term.screen();
+		const panelRow = withPanel.find(line => line.includes("PANEL"));
+		expect(panelRow).toBeDefined();
+		expect(panelRow!.indexOf("PANEL")).toBeGreaterThan(panelRow!.indexOf("│"));
+		// The transcript is laid out at the remaining width: its rows end at the divider.
+		expect(withPanel.some(line => line.includes("alpha") && line.includes("│"))).toBe(true);
+
+		term.backend.setSidePanel(undefined);
+		term.render();
+		expect(term.screen().some(line => line.includes("PANEL"))).toBe(false);
+		expect(term.screen().some(line => line.includes("│"))).toBe(false);
+		term.dispose();
+	});
+});
