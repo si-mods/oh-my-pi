@@ -98,7 +98,7 @@ export class DiffModel {
 
 /** The `/diff` panel as one overlay node; `onClose` runs for Esc/q. */
 export function DiffPanel(props: { readonly model: DiffModel; readonly onClose: () => void }): JSXNode {
-	return () => (
+	return (
 		<overlay
 			key="diff-panel"
 			role="omp.diff"
