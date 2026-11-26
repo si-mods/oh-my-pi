@@ -433,3 +433,92 @@ describe("fullscreen transcript side panel", () => {
 		term.dispose();
 	});
 });
+
+describe("fullscreen transcript side panel chrome", () => {
+	it("closes a transcript row's style before the divider", () => {
+		const styled = (<text spans={[{ s: "accent", t: "colourful" }]} />) as UiNode;
+		settle(styled);
+		const blocks = signal<UiNode[]>([styled]);
+		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
+			columns: 40,
+			rows: 6,
+			transcriptFullscreen: true,
+		});
+		term.backend.setSidePanel({ lines: () => ["PANEL"] });
+		term.render();
+		const row = term.rows().find(line => line.includes("PANEL"))!;
+		const divider = row.indexOf("│");
+		expect(divider).toBeGreaterThan(0);
+		// Everything before the divider is reset (0m) then dimmed (2m); the row ends reset.
+		expect(row.slice(0, divider).endsWith("\x1b[0m\x1b[2m")).toBe(true);
+		expect(row.endsWith("\x1b[0m")).toBe(true);
+		term.dispose();
+	});
+
+	it("drags the divider to resize the column", () => {
+		const blocks = signal<UiNode[]>([(<text text="alpha" />) as UiNode]);
+		settle(blocks.peek()[0]!);
+		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
+			columns: 40,
+			rows: 6,
+			transcriptFullscreen: true,
+		});
+		term.backend.setSidePanel({ lines: () => ["PANEL"] });
+		term.render();
+		const dividerColumn = (): number =>
+			term
+				.screen()
+				.find(line => line.includes("PANEL"))!
+				.indexOf("│");
+		const before = dividerColumn();
+
+		term.mouse({ row: 0, col: before, button: "left", action: "press", mods: [] });
+		term.mouse({ row: 0, col: 10, button: "left", action: "drag", mods: [] });
+		term.render();
+		const dragged = dividerColumn();
+		expect(dragged).toBeLessThan(before);
+
+		term.mouse({ row: 0, col: 10, button: "left", action: "release", mods: [] });
+		term.render();
+		expect(dividerColumn()).toBe(dragged);
+		term.dispose();
+	});
+});
+
+describe("fullscreen transcript click to copy", () => {
+	function clickable(line: string) {
+		const node = (<text text={line} />) as UiNode;
+		settle(node);
+		const blocks = signal<UiNode[]>([node]);
+		const copied: string[] = [];
+		const term = createTestTerminal(() => ({ main: () => blocks(), dock: <text text="dock" /> }), {
+			columns: 30,
+			rows: 6,
+			transcriptFullscreen: true,
+			onTranscriptCopy: text => copied.push(text),
+		});
+		return { term, copied };
+	}
+
+	it("copies the word a click lands in", () => {
+		const { term, copied } = clickable("hello world");
+		const row = term.screen().findIndex(line => line.includes("hello"));
+		term.mouse({ row, col: 2, button: "left", action: "press", mods: [] });
+		term.mouse({ row, col: 2, button: "left", action: "release", mods: [] });
+		expect(copied).toEqual(["hello"]);
+		term.dispose();
+	});
+
+	it("copies the Chinese run a click lands in, from either half of a wide glyph", () => {
+		const { term, copied } = clickable("后只 UB600");
+		const row = term.screen().findIndex(line => line.includes("后只"));
+		term.mouse({ row, col: 0, button: "left", action: "press", mods: [] });
+		term.mouse({ row, col: 0, button: "left", action: "release", mods: [] });
+		term.mouse({ row, col: 1, button: "left", action: "press", mods: [] });
+		term.mouse({ row, col: 1, button: "left", action: "release", mods: [] });
+		term.mouse({ row, col: 5, button: "left", action: "press", mods: [] });
+		term.mouse({ row, col: 5, button: "left", action: "release", mods: [] });
+		expect(copied).toEqual(["后只", "后只", "UB600"]);
+		term.dispose();
+	});
+});
