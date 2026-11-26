@@ -146,6 +146,8 @@ export interface Host {
 	nextSearchMatch(delta: number): { readonly index: number; readonly count: number } | undefined;
 	/** The active search, if any. */
 	searchState(): { readonly query: string; readonly index: number; readonly count: number } | undefined;
+	/** The main region's nodes changed wholesale (a view filter): repaint the fullscreen transcript. */
+	invalidateTranscriptCache(): void;
 	/** Whether the terminal advertises TSP feature `name` (reactive; always false in the terminal renderer). */
 	feature(name: string): boolean;
 	/**
@@ -251,6 +253,7 @@ type Renderer = Pick<
 	| "searchTranscript"
 	| "nextSearchMatch"
 	| "searchState"
+	| "invalidateTranscriptCache"
 > & {
 	/** Stop rendering and release the renderer (not the driver). */
 	stop(): void;
@@ -384,6 +387,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
 			searchTranscript: () => undefined,
 			nextSearchMatch: () => undefined,
 			searchState: () => undefined,
+			invalidateTranscriptCache: () => {},
 			feature: name => connection.hasFeature(name),
 			checkoutShown: () => connection.checkout(),
 			setMouse: tracking => driver.setMouse(tracking),
@@ -448,6 +452,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
 			searchTranscript: query => backend.searchTranscript(query),
 			nextSearchMatch: delta => backend.nextSearchMatch(delta),
 			searchState: () => backend.searchState(),
+			invalidateTranscriptCache: () => backend.invalidateTranscriptCache(),
 			feature: () => false,
 			checkoutShown: () => false,
 			setMouse(tracking) {
@@ -497,6 +502,7 @@ export async function startHost(options: HostOptions): Promise<Host> {
 		searchTranscript: query => renderer.searchTranscript(query),
 		nextSearchMatch: delta => renderer.nextSearchMatch(delta),
 		searchState: () => renderer.searchState(),
+		invalidateTranscriptCache: () => renderer.invalidateTranscriptCache(),
 		feature: name => renderer.feature(name),
 		checkoutShown: () => renderer.checkoutShown(),
 		suspend: run => renderer.suspend(run),

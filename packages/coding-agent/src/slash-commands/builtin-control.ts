@@ -86,6 +86,16 @@ async function runPauseScreen(ctx: InteractiveModeContext): Promise<void> {
 
 export const BUILTIN_CONTROL_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 	{
+		name: "focus",
+		icon: "eye",
+		description:
+			"Show only the last turn of the transcript (prompt, tool summaries, answer), or the whole transcript",
+		handleTui: async (_command, runtime) => {
+			runtime.ctx.toggleFocusView();
+			return commandConsumed();
+		},
+	},
+	{
 		name: "force",
 		icon: "hammer",
 		description: "Force next turn to use a specific tool",

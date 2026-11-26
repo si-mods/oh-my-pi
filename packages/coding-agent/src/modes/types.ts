@@ -612,6 +612,8 @@ export interface InteractiveModeContext {
 	 * scrollback is rebuilt (`shell.host?.replayHistory()`). No walking blocks to push it.
 	 */
 	toolOutputExpanded: boolean;
+	/** Toggle the last-turn-only transcript view (`/focus`). */
+	toggleFocusView(): void;
 	/** Tool activity hidden (reactive, see {@link toolOutputExpanded}). */
 	hideToolActivity: boolean;
 	todoExpanded: boolean;

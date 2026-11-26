@@ -802,6 +802,18 @@ export const cfgDisplayHideToolActivity = register({
 	},
 });
 
+export const cfgDisplayFocus = register({
+	id: "display.focus",
+	type: "boolean",
+	default: false,
+	ui: {
+		tab: "appearance",
+		group: "Display",
+		label: "Focus View",
+		description: "Show only the last turn in the transcript, from its prompt onward (`/focus` toggles it)",
+	},
+});
+
 export const cfgDisplayShowTokenUsage = register({
 	id: "display.showTokenUsage",
 	type: "boolean",
