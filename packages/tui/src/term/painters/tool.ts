@@ -5,8 +5,8 @@
  * `frame:"inline"`; collapsed, the body keeps its `preview` rows.
  */
 import type { TspCardStatus, TspPreview, TspTone, TspToolProps } from "@oh-my-pi/pi-wire";
-import { truncate, visibleWidth } from "../../text/width";
-import { type Block, definePainter, EMPTY_BLOCK, type PaintContext, TOOL_TOGGLE_ACT } from "../paint";
+import { truncate } from "../../text/width";
+import { type Block, definePainter, EMPTY_BLOCK, type PaintContext } from "../paint";
 import { bodyRows, borderOf, boxRows, disclosed } from "./card";
 import { styledText } from "./layout";
 import { SPINNER_INTERVAL_MS } from "./spinner";
@@ -63,23 +63,9 @@ definePainter("tool", (node, cx): Block => {
 		const rows = [truncate(head, cx.width, theme.symbols.ellipsis)];
 		for (const row of disclosed(theme, bodyRows(node, cx, cx.width - 2), collapsed, props.preview))
 			rows.push(truncate(`  ${row}`, cx.width, ""));
-		// A collapsed block's head is the expander: a click on it is the same as the expand key.
-		const expandable = props.collapsible === true && collapsed && rows.length > 0;
-		return {
-			rows,
-			hits: expandable
-				? [{ row: 0, col: 0, width: visibleWidth(rows[0]!), height: 1, node, act: TOOL_TOGGLE_ACT }]
-				: [],
-		};
+		return { rows };
 	}
 	const body = disclosed(theme, bodyRows(node, cx, cx.width - 4), collapsed, props.preview);
 	const rows = boxRows(theme, body, cx.width, head, borderOf(props.tone, props.status));
-	// The card's head sits in its top border: a click there expands, like the inline head.
-	const expandable = props.collapsible === true && collapsed && rows.length > 0;
-	return {
-		rows,
-		hits: expandable
-			? [{ row: 0, col: 0, width: visibleWidth(rows[0]!), height: 1, node, act: TOOL_TOGGLE_ACT }]
-			: [],
-	};
+	return { rows };
 });

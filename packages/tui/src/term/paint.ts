@@ -15,6 +15,7 @@ import type { CellSize } from "../driver/images/fit";
 import type { ImageRequest, ImageRows, ImageSource } from "../driver/images/store";
 import type { UiKind, UiNode } from "../node";
 import { type Accessor, computed, createRoot, signal } from "../reactive";
+import { visibleWidth } from "../text/width";
 import type { Theme } from "../theme/contract";
 
 /** A cell position inside a block. */
@@ -148,8 +149,20 @@ export type Painter = (node: UiNode, cx: PaintContext) => Block;
 /** The empty block (hidden nodes, zero-size allocations). */
 export const EMPTY_BLOCK: Block = Object.freeze({ rows: Object.freeze([]) as readonly string[] });
 
-/** The action a collapsible tool's collapsed header emits on a click: expand the block. */
+/** The action a collapsible tool's head emits on a click: expand the block. */
 export const TOOL_TOGGLE_ACT = "omp.toggle";
+
+/** Give a collapsible tool's first row the expand action, whichever style painter drew it. */
+function withToolToggle(node: UiNode, block: Block): Block {
+	if (node.kind !== "tool" || (node.props() as { collapsible?: boolean }).collapsible !== true) return block;
+	if (block.rows.length === 0) return block;
+	const width = visibleWidth(block.rows[0]!);
+	if (width === 0) return block;
+	return {
+		...block,
+		hits: [...(block.hits ?? []), { row: 0, col: 0, width, height: 1, node, act: TOOL_TOGGLE_ACT }],
+	};
+}
 
 const kindPainters = new Map<UiKind, Painter>();
 const rolePainters = new Map<string, Painter>();
@@ -279,7 +292,7 @@ export function paintNode(env: PaintEnvironment, node: UiNode, width: number, he
 					if (node.props().hidden === true) return EMPTY_BLOCK;
 					const painter = painterFor(node);
 					if (!painter) throw new Error(`pi-tui: no terminal painter for <${node.kind}>`);
-					return painter(node, cx);
+					return withToolToggle(node, painter(node, cx));
 				},
 				{ equals: sameBlock },
 			),
